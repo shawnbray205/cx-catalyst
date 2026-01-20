@@ -1,3 +1,7 @@
+---
+render_with_liquid: false
+---
+
 # Confluence Workflow Modifications Guide
 
 This document describes the exact modifications needed to integrate Confluence KB into existing workflows.

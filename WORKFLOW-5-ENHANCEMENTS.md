@@ -1,3 +1,7 @@
+---
+render_with_liquid: false
+---
+
 # Workflow 5 Enhancements - Confluence KB Integration
 
 ## Problem Identified

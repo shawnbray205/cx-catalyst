@@ -1,3 +1,7 @@
+---
+render_with_liquid: false
+---
+
 # Confluence Knowledge Base Integration Guide
 
 Complete guide for setting up, populating, and maintaining Confluence as the central knowledge repository for AI-powered support.
