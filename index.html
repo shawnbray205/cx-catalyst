@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Support Portal | CX-Catalyst</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --bg-input: #0f172a;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #334155;
+            --border-focus: #3b82f6;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary), #7c3aed);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .logo-text {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+
+        /* Form Card */
+        .form-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+
+        .form-section {
+            margin-bottom: 32px;
+        }
+
+        .form-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .form-row.single {
+            grid-template-columns: 1fr;
+        }
+
+        .form-row.triple {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .form-group label .required {
+            color: var(--danger);
+            margin-left: 2px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            padding: 12px 14px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-group select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 40px;
+        }
+
+        .form-group select option {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .form-group textarea {
+            min-height: 140px;
+            resize: vertical;
+        }
+
+        .form-help {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Severity Selection */
+        .severity-options {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .severity-option {
+            position: relative;
+        }
+
+        .severity-option input {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .severity-option label {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px 12px;
+            background: var(--bg-input);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .severity-option label:hover {
+            border-color: var(--text-muted);
+        }
+
+        .severity-option input:checked + label {
+            border-color: var(--primary);
+            background: rgba(37, 99, 235, 0.1);
+        }
+
+        .severity-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .severity-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .severity-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .severity-option.critical label { border-left: 3px solid var(--danger); }
+        .severity-option.high label { border-left: 3px solid var(--warning); }
+        .severity-option.medium label { border-left: 3px solid var(--primary); }
+        .severity-option.low label { border-left: 3px solid var(--success); }
+
+        .severity-option.critical input:checked + label { border-color: var(--danger); background: rgba(239, 68, 68, 0.1); }
+        .severity-option.high input:checked + label { border-color: var(--warning); background: rgba(245, 158, 11, 0.1); }
+        .severity-option.medium input:checked + label { border-color: var(--primary); background: rgba(37, 99, 235, 0.1); }
+        .severity-option.low input:checked + label { border-color: var(--success); background: rgba(16, 185, 129, 0.1); }
+
+        /* Submit Button */
+        .submit-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 16px 32px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .submit-btn:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .submit-btn .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        .submit-btn.loading .spinner {
+            display: block;
+        }
+
+        .submit-btn.loading .btn-text {
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .submit-hint {
+            font-size: 13px;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        /* Success/Error Messages */
+        .message {
+            padding: 16px 20px;
+            border-radius: 10px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .message.success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .message.error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .message-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .message-content h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .message-content p {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .ticket-id {
+            font-family: monospace;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        /* Response Details */
+        .response-details {
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .response-details .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+
+        .response-details .detail-label {
+            color: var(--text-muted);
+        }
+
+        .response-details .detail-value {
+            font-weight: 600;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .container {
+                padding: 24px 16px;
+            }
+
+            .form-card {
+                padding: 24px 20px;
+            }
+
+            .form-row,
+            .form-row.triple {
+                grid-template-columns: 1fr;
+            }
+
+            .severity-options {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+        }
+
+        /* Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .form-card {
+            animation: fadeIn 0.4s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">🚀</div>
+                <span class="logo-text">CX-Catalyst</span>
+            </div>
+            <h1>Smart Support Intake</h1>
+            <p>Submit a support request and our AI-powered triage system will route it to the right team.</p>
+        </header>
+
+        <!-- Success/Error Message -->
+        <div id="successMessage" class="message success">
+            <span class="message-icon">✓</span>
+            <div class="message-content">
+                <h4>Request Submitted Successfully!</h4>
+                <p>Your case <span class="ticket-id" id="ticketId"></span> has been created and triaged.</p>
+                <div class="response-details" id="responseDetails">
+                    <div class="detail-row">
+                        <span class="detail-label">Category:</span>
+                        <span class="detail-value" id="resCategory">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Priority:</span>
+                        <span class="detail-value" id="resPriority">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Resolution Path:</span>
+                        <span class="detail-value" id="resPath">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Estimated Response:</span>
+                        <span class="detail-value" id="resTime">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="errorMessage" class="message error">
+            <span class="message-icon">!</span>
+            <div class="message-content">
+                <h4>Submission Failed</h4>
+                <p id="errorText">There was an error submitting your request. Please try again.</p>
+            </div>
+        </div>
+
+        <!-- Form -->
+        <form id="supportForm" class="form-card">
+            <!-- Customer Information -->
+            <div class="form-section">
+                <h3 class="section-title">Customer Information</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="customer_name">Full Name <span class="required">*</span></label>
+                        <input type="text" id="customer_name" name="customer_name" placeholder="John Doe" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="customer_email">Email Address <span class="required">*</span></label>
+                        <input type="email" id="customer_email" name="customer_email" placeholder="john.doe@company.com" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="customer_id">Customer ID</label>
+                        <input type="text" id="customer_id" name="customer_id" placeholder="CUST-12345">
+                        <span class="form-help">Your unique customer identifier (if known)</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="channel">Contact Channel</label>
+                        <select id="channel" name="channel">
+                            <option value="web_portal">Web Portal</option>
+                            <option value="email">Email</option>
+                            <option value="chat">Live Chat</option>
+                            <option value="phone">Phone</option>
+                            <option value="api">API</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product & Environment -->
+            <div class="form-section">
+                <h3 class="section-title">Product & Environment</h3>
+                <div class="form-row triple">
+                    <div class="form-group">
+                        <label for="product">Product <span class="required">*</span></label>
+                        <select id="product" name="product" required>
+                            <option value="">Select a product...</option>
+                            <option value="core_platform">Core Platform</option>
+                            <option value="analytics">Analytics Suite</option>
+                            <option value="api_services">API Services</option>
+                            <option value="mobile_app">Mobile App</option>
+                            <option value="integrations">Integrations</option>
+                            <option value="enterprise">Enterprise Suite</option>
+                            <option value="developer_tools">Developer Tools</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="product_version">Product Version</label>
+                        <input type="text" id="product_version" name="product_version" placeholder="e.g., 2.5.1, latest">
+                    </div>
+                    <div class="form-group">
+                        <label for="environment">Environment <span class="required">*</span></label>
+                        <select id="environment" name="environment" required>
+                            <option value="production">Production</option>
+                            <option value="staging">Staging</option>
+                            <option value="development">Development</option>
+                            <option value="sandbox">Sandbox</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Issue Details -->
+            <div class="form-section">
+                <h3 class="section-title">Issue Details</h3>
+                <div class="form-row single">
+                    <div class="form-group">
+                        <label for="description">Description <span class="required">*</span></label>
+                        <textarea id="description" name="description" placeholder="Please describe your issue in detail. Include:
+- What you were trying to do
+- What happened vs. what you expected
+- Any error messages you received
+- Steps to reproduce the issue" required></textarea>
+                        <span class="form-help">Provide as much detail as possible to help us understand and resolve your issue quickly.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Severity -->
+            <div class="form-section">
+                <h3 class="section-title">Severity Level</h3>
+                <div class="severity-options">
+                    <div class="severity-option critical">
+                        <input type="radio" id="severityCritical" name="severity" value="critical">
+                        <label for="severityCritical">
+                            <span class="severity-icon">🔴</span>
+                            <span class="severity-name">Critical</span>
+                            <span class="severity-desc">System down, data loss</span>
+                        </label>
+                    </div>
+                    <div class="severity-option high">
+                        <input type="radio" id="severityHigh" name="severity" value="high">
+                        <label for="severityHigh">
+                            <span class="severity-icon">🟠</span>
+                            <span class="severity-name">High</span>
+                            <span class="severity-desc">Major impact</span>
+                        </label>
+                    </div>
+                    <div class="severity-option medium">
+                        <input type="radio" id="severityMedium" name="severity" value="medium" checked>
+                        <label for="severityMedium">
+                            <span class="severity-icon">🔵</span>
+                            <span class="severity-name">Medium</span>
+                            <span class="severity-desc">Workaround exists</span>
+                        </label>
+                    </div>
+                    <div class="severity-option low">
+                        <input type="radio" id="severityLow" name="severity" value="low">
+                        <label for="severityLow">
+                            <span class="severity-icon">🟢</span>
+                            <span class="severity-name">Low</span>
+                            <span class="severity-desc">Question/minor</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Additional Metadata -->
+            <div class="form-section">
+                <h3 class="section-title">Additional Information (Optional)</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="error_code">Error Code</label>
+                        <input type="text" id="error_code" name="error_code" placeholder="e.g., ERR_500, TIMEOUT_001">
+                    </div>
+                    <div class="form-group">
+                        <label for="browser_info">Browser/Client Info</label>
+                        <input type="text" id="browser_info" name="browser_info" placeholder="e.g., Chrome 120, iOS 17">
+                    </div>
+                </div>
+                <div class="form-row single">
+                    <div class="form-group">
+                        <label for="steps_to_reproduce">Steps to Reproduce</label>
+                        <textarea id="steps_to_reproduce" name="steps_to_reproduce" placeholder="1. Go to...
+2. Click on...
+3. Enter...
+4. Error appears" style="min-height: 100px;"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submit -->
+            <div class="submit-section">
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    <span class="spinner"></span>
+                    <span class="btn-text">Submit Support Request</span>
+                </button>
+                <p class="submit-hint">Your request will be analyzed by our AI triage system and routed to the appropriate team.</p>
+            </div>
+        </form>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Powered by <strong>CX-Catalyst</strong> Smart Support Intake & Triage</p>
+            <p>For critical production emergencies, call <a href="tel:+18001234567">1-800-123-4567</a></p>
+        </footer>
+    </div>
+
+    <script>
+        // Webhook URL - CX-Catalyst Smart Intake & Triage
+        const WEBHOOK_URL = 'https://sbray205.app.n8n.cloud/webhook/support/intake';
+
+        // Form submission
+        const form = document.getElementById('supportForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const successMessage = document.getElementById('successMessage');
+        const errorMessage = document.getElementById('errorMessage');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Hide previous messages
+            successMessage.style.display = 'none';
+            errorMessage.style.display = 'none';
+
+            // Show loading state
+            submitBtn.classList.add('loading');
+            submitBtn.disabled = true;
+
+            // Build payload matching CX-Catalyst schema
+            const payload = {
+                // Required fields
+                customer_id: document.getElementById('customer_id').value || null,
+                customer_email: document.getElementById('customer_email').value,
+                customer_name: document.getElementById('customer_name').value,
+                description: document.getElementById('description').value,
+                severity: document.querySelector('input[name="severity"]:checked').value,
+                product: document.getElementById('product').value,
+
+                // Optional fields
+                product_version: document.getElementById('product_version').value || null,
+                environment: document.getElementById('environment').value,
+                channel: document.getElementById('channel').value,
+
+                // Metadata object for additional context
+                metadata: {
+                    error_code: document.getElementById('error_code').value || null,
+                    browser_info: document.getElementById('browser_info').value || null,
+                    steps_to_reproduce: document.getElementById('steps_to_reproduce').value || null,
+                    submitted_at: new Date().toISOString(),
+                    user_agent: navigator.userAgent,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                    source: 'web_portal'
+                }
+            };
+
+            try {
+                const response = await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                // Parse response
+                let result;
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    result = await response.json();
+                } else {
+                    const text = await response.text();
+                    try {
+                        result = JSON.parse(text);
+                    } catch {
+                        result = { success: response.ok };
+                    }
+                }
+
+                if (response.ok) {
+                    // Success - display response from n8n workflow
+                    const caseId = result.case_id || result.request_id || 'CASE-' + Date.now().toString(36).toUpperCase();
+                    document.getElementById('ticketId').textContent = caseId;
+
+                    // Populate response details if available
+                    if (result.classification) {
+                        document.getElementById('resCategory').textContent = result.classification.category || '-';
+                        document.getElementById('resPriority').textContent = result.classification.priority || '-';
+                        document.getElementById('resPath').textContent = result.classification.resolution_path || '-';
+                    } else {
+                        document.getElementById('resCategory').textContent = '-';
+                        document.getElementById('resPriority').textContent = payload.severity;
+                        document.getElementById('resPath').textContent = 'Processing...';
+                    }
+
+                    document.getElementById('resTime').textContent = result.estimated_response_time || getEstimatedResponseTime(payload.severity);
+
+                    successMessage.style.display = 'flex';
+                    form.reset();
+
+                    // Reset severity to medium (default)
+                    document.getElementById('severityMedium').checked = true;
+
+                    // Scroll to success message
+                    successMessage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    throw new Error(result.message || result.error || 'Server returned an error');
+                }
+            } catch (error) {
+                console.error('Submission error:', error);
+                document.getElementById('errorText').textContent = error.message || 'There was an error submitting your request. Please try again.';
+                errorMessage.style.display = 'flex';
+                errorMessage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } finally {
+                submitBtn.classList.remove('loading');
+                submitBtn.disabled = false;
+            }
+        });
+
+        // Get estimated response time based on severity
+        function getEstimatedResponseTime(severity) {
+            const times = {
+                critical: 'Immediate (< 1 hour)',
+                high: 'Within 2 hours',
+                medium: 'Within 24 hours',
+                low: 'Within 48 hours'
+            };
+            return times[severity] || 'Within 24 hours';
+        }
+
+        // Auto-detect browser info on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const browserInfo = [];
+
+            // Detect browser
+            const ua = navigator.userAgent;
+            if (ua.includes('Chrome') && !ua.includes('Edg')) {
+                const match = ua.match(/Chrome\/(\d+)/);
+                browserInfo.push('Chrome ' + (match ? match[1] : ''));
+            } else if (ua.includes('Firefox')) {
+                const match = ua.match(/Firefox\/(\d+)/);
+                browserInfo.push('Firefox ' + (match ? match[1] : ''));
+            } else if (ua.includes('Safari') && !ua.includes('Chrome')) {
+                const match = ua.match(/Version\/(\d+)/);
+                browserInfo.push('Safari ' + (match ? match[1] : ''));
+            } else if (ua.includes('Edg')) {
+                const match = ua.match(/Edg\/(\d+)/);
+                browserInfo.push('Edge ' + (match ? match[1] : ''));
+            }
+
+            // Detect OS
+            if (ua.includes('Windows NT 10')) browserInfo.push('Windows');
+            else if (ua.includes('Mac OS X')) browserInfo.push('macOS');
+            else if (ua.includes('Linux')) browserInfo.push('Linux');
+            else if (ua.includes('Android')) browserInfo.push('Android');
+            else if (ua.includes('iOS') || ua.includes('iPhone')) browserInfo.push('iOS');
+
+            if (browserInfo.length > 0) {
+                document.getElementById('browser_info').value = browserInfo.join(', ');
+            }
+        });
+    </script>
+</body>
+</html>
