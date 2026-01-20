@@ -1,0 +1,40 @@
+# Grafana Datasource Configuration
+# Place this file in: /etc/grafana/provisioning/datasources/
+# Or configure manually in Grafana UI: Configuration > Data Sources
+
+apiVersion: 1
+
+datasources:
+  # PostgreSQL - Primary data source for all KPI metrics
+  - name: Support Database
+    type: postgres
+    uid: support-postgres
+    url: ${DB_HOST}:5432
+    database: support_system
+    user: ${DB_USER}
+    secureJsonData:
+      password: ${DB_PASSWORD}
+    jsonData:
+      sslmode: require
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1500  # PostgreSQL 15
+      timescaledb: false
+    editable: true
+
+  # Optional: Prometheus for n8n metrics (if using prometheus exporter)
+  - name: n8n Metrics
+    type: prometheus
+    uid: n8n-prometheus
+    url: http://prometheus:9090
+    access: proxy
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+    editable: true
+    isDefault: false
+
+# Note: Replace ${DB_HOST}, ${DB_USER}, ${DB_PASSWORD} with actual values
+# or set as environment variables in Grafana configuration

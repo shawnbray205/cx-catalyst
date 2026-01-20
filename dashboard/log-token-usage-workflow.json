@@ -1,0 +1,79 @@
+{
+  "name": "Log Token Usage (Sub-workflow)",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract token usage from AI response\n// This should be called after each AI node with the response data\n\nconst input = $input.first().json;\n\n// Common fields\nconst record = {\n  workflow_name: input.workflow_name || 'unknown',\n  workflow_execution_id: input.execution_id || $execution.id,\n  case_id: input.case_id || null,\n  provider: input.provider || 'anthropic',\n  model: input.model || 'claude-sonnet-4',\n  operation_type: input.operation_type || 'completion',\n  input_tokens: 0,\n  output_tokens: 0,\n  latency_ms: input.latency_ms || null,\n  success: input.success !== false,\n  error_message: input.error_message || null,\n  recorded_at: new Date().toISOString(),\n  metadata: JSON.stringify(input.metadata || {})\n};\n\n// Extract tokens based on response format\n// Anthropic format\nif (input.usage) {\n  record.input_tokens = input.usage.input_tokens || 0;\n  record.output_tokens = input.usage.output_tokens || 0;\n}\n// OpenAI format\nelse if (input.usage_metadata) {\n  record.input_tokens = input.usage_metadata.prompt_tokens || 0;\n  record.output_tokens = input.usage_metadata.completion_tokens || 0;\n}\n// n8n AI node format\nelse if (input.response?.usage) {\n  record.input_tokens = input.response.usage.input_tokens || input.response.usage.prompt_tokens || 0;\n  record.output_tokens = input.response.usage.output_tokens || input.response.usage.completion_tokens || 0;\n}\n// Direct token counts\nelse if (input.input_tokens !== undefined) {\n  record.input_tokens = input.input_tokens || 0;\n  record.output_tokens = input.output_tokens || 0;\n}\n\nreturn { json: record };"
+      },
+      "id": "extract-tokens",
+      "name": "Extract Token Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "token_usage",
+        "columns": "workflow_name, workflow_execution_id, case_id, provider, model, operation_type, input_tokens, output_tokens, latency_ms, success, error_message, recorded_at, metadata",
+        "options": {}
+      },
+      "id": "insert-record",
+      "name": "Insert Token Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CRED",
+          "name": "Support Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return success response\nreturn {\n  json: {\n    logged: true,\n    usage_id: $input.first().json.usage_id,\n    tokens_logged: $input.first().json.input_tokens + $input.first().json.output_tokens\n  }\n};"
+      },
+      "id": "return-response",
+      "name": "Return Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Extract Token Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Token Data": {
+      "main": [
+        [{ "node": "Insert Token Record", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Token Record": {
+      "main": [
+        [{ "node": "Return Response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-01-19T00:00:00.000Z",
+  "versionId": "1"
+}

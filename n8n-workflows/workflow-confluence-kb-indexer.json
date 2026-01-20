@@ -1,0 +1,302 @@
+{
+  "name": "Confluence KB Indexer",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "b2c3d4e5-f6a7-8901-2345-678901bcdefg",
+      "name": "Schedule: Daily 2 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://YOUR-COMPANY.atlassian.net/wiki/rest/api/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "type",
+              "value": "page"
+            },
+            {
+              "name": "spaceKey",
+              "value": "SUPPORT"
+            },
+            {
+              "name": "expand",
+              "value": "body.storage,version,metadata.labels,space"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            },
+            {
+              "name": "status",
+              "value": "current"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "c3d4e5f6-a7b8-9012-3456-789012cdefgh",
+      "name": "Get All Confluence Pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "YOUR_CONFLUENCE_CREDENTIAL_ID",
+          "name": "Confluence API (Basic Auth)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split array response into individual pages\nconst response = $input.first().json;\nconst pages = response.results || [];\n\nreturn pages.map(page => ({ json: page }));"
+      },
+      "id": "split-pages-node-uuid",
+      "name": "Split Pages Array",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [580, 300]
+    },
+    {
+      "parameters": {
+        "content": "## Confluence KB Indexer\n\nIndexes Confluence pages into vector database.\n\n**Runs:** Daily at 2 AM\n**Can run:** Manually\n\n**Flow:**\n1. Fetch pages from SUPPORT space (HTTP Request)\n2. Split array into individual items\n3. Clean HTML content  \n4. Generate embeddings (OpenAI)\n5. Insert into Supabase vector store\n\n**Setup:**\n- Update credential IDs\n- Set YOUR-COMPANY domain in HTTP Request\n- Ensure Supabase table exists\n- Check OpenAI API quota\n\n**Confluence API:**\nUses Basic Auth (email + API token)\nEndpoint: /wiki/rest/api/content"
+      },
+      "id": "d4e5f6a7-b8c9-0123-4567-890123defghi",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [40, 140],
+      "height": 360,
+      "width": 280
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean and format Confluence page content for embedding\nconst page = $input.item.json;\n\ntry {\n  // Extract basic info\n  const pageId = page.id;\n  const title = page.title;\n  const spaceKey = page.space?.key || 'SUPPORT';\n  const version = page.version?.number || 1;\n  const lastModified = page.version?.when || new Date().toISOString();\n  \n  // Get HTML content\n  const htmlContent = page.body?.storage?.value || '';\n  \n  // Strip HTML tags and clean\n  let cleanContent = htmlContent\n    .replace(/<[^>]*>/g, ' ')           // Remove HTML tags\n    .replace(/&nbsp;/g, ' ')            // Replace &nbsp;\n    .replace(/&amp;/g, '&')             // Replace &amp;\n    .replace(/&lt;/g, '<')              // Replace &lt;\n    .replace(/&gt;/g, '>')              // Replace &gt;\n    .replace(/&quot;/g, '\"')           // Replace &quot;\n    .replace(/\\s+/g, ' ')               // Collapse whitespace\n    .trim();\n  \n  // Truncate if too long (max 8000 tokens ≈ 32000 chars)\n  if (cleanContent.length > 32000) {\n    cleanContent = cleanContent.substring(0, 32000) + '...';\n  }\n  \n  // Create searchable text: title + content\n  const searchableText = `${title}\\n\\n${cleanContent}`;\n  \n  // Build URL\n  const baseUrl = 'https://YOUR-COMPANY.atlassian.net';\n  const url = `${baseUrl}/wiki/spaces/${spaceKey}/pages/${pageId}`;\n  \n  // Extract labels\n  const labels = (page.metadata?.labels?.results || []).map(l => l.name);\n  \n  // Metadata for vector store\n  const metadata = {\n    page_id: pageId,\n    title: title,\n    spaceKey: spaceKey,\n    url: url,\n    labels: labels,\n    version: version,\n    lastModified: lastModified\n  };\n  \n  // Format for LangChain vector store (requires pageContent and metadata)\n  return {\n    json: {\n      pageContent: searchableText,\n      metadata: metadata\n    }\n  };\n  \n} catch (error) {\n  console.error(`Error processing page:`, error);\n  // Return empty to skip this page\n  return { json: {} };\n}"
+      },
+      "id": "e5f6a7b8-c9d0-1234-5678-901234efghij",
+      "name": "Clean & Format Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 300]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "f6a7b8c9-d0e1-2345-6789-012345fghijk",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [1000, 500],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": "confluence_kb",
+        "options": {}
+      },
+      "id": "a7b8c9d0-e1f2-3456-7890-123456ghijkl",
+      "name": "Vector Store Supabase",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [1000, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate results and create summary\nconst items = $input.all();\n\nconst summary = {\n  total_pages_processed: items.length,\n  indexed_successfully: items.length,\n  errors: 0,\n  timestamp: new Date().toISOString()\n};\n\n// Get some sample pages from metadata\nconst samplePages = items.slice(0, 5).map(i => {\n  const meta = i.json.metadata || {};\n  return {\n    page_id: meta.page_id || 'unknown',\n    title: meta.title || 'Unknown Title'\n  };\n});\n\nreturn [{\n  json: {\n    ...summary,\n    sample_pages: samplePages,\n    message: `Successfully indexed ${summary.indexed_successfully} Confluence pages`\n  }\n}];"
+      },
+      "id": "c9d0e1f2-a3b4-5678-9012-345678ijklmn",
+      "name": "Summarize Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channel\": \"#support-updates\",\n  \"text\": \"✅ Confluence KB Indexing Complete\\n\\n📊 *Summary:*\\n• Total Pages: {{ $json.total_pages_processed }}\\n• Successfully Indexed: {{ $json.indexed_successfully }}\\n• Errors: {{ $json.errors }}\\n• Timestamp: {{ $json.timestamp }}\\n\\n🔍 Sample Pages:\\n{{ $json.sample_pages.map(p => `• ${p.title.substring(0, 50)} (${p.page_id})`).join('\\\\n') }}\"\n}",
+        "options": {}
+      },
+      "id": "d0e1f2a3-b4c5-6789-0123-456789jklmno",
+      "name": "Notify Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 200],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO workflow_executions (\n  workflow_name,\n  execution_id,\n  status,\n  metrics,\n  started_at,\n  completed_at\n)\nVALUES (\n  'confluence-kb-indexer',\n  '{{ $workflow.id }}',\n  'success',\n  '{{ $json }}'::jsonb,\n  NOW() - INTERVAL '5 minutes',\n  NOW()\n);",
+        "options": {}
+      },
+      "id": "e1f2a3b4-c5d6-7890-1234-567890klmnop",
+      "name": "Log Execution",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [1440, 400],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL - Support DB"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get All Confluence Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule: Daily 2 AM": {
+      "main": [
+        [
+          {
+            "node": "Get All Confluence Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Confluence Pages": {
+      "main": [
+        [
+          {
+            "node": "Split Pages Array",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Pages Array": {
+      "main": [
+        [
+          {
+            "node": "Clean & Format Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean & Format Content": {
+      "main": [
+        [
+          {
+            "node": "Vector Store Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Store Supabase": {
+      "main": [
+        [
+          {
+            "node": "Summarize Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Vector Store Supabase",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Results": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "pinData": {},
+  "triggerCount": 0,
+  "active": false
+}

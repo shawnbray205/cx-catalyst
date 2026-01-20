@@ -1,0 +1,260 @@
+{
+  "name": "Token Usage Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.anthropic.com/v1/usage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "fetch-anthropic-usage",
+      "name": "Fetch Anthropic Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ANTHROPIC_HEADER_AUTH",
+          "name": "Anthropic API Header"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.openai.com/v1/usage",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "fetch-openai-usage",
+      "name": "Fetch OpenAI Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OPENAI_HEADER_AUTH",
+          "name": "OpenAI API Header"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "query": "SELECT \n  workflow_name,\n  COUNT(*) as execution_count,\n  COUNT(CASE WHEN status = 'success' THEN 1 END) as success_count,\n  AVG(duration_ms) as avg_duration\nFROM workflow_executions\nWHERE start_time >= NOW() - INTERVAL '5 minutes'\nGROUP BY workflow_name",
+        "options": {}
+      },
+      "id": "fetch-workflow-stats",
+      "name": "Fetch Workflow Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 600],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CRED",
+          "name": "Support Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge All Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process and normalize token usage data from all sources\n\nconst items = $input.all();\nconst now = new Date().toISOString();\nconst tokenRecords = [];\n\n// Process Anthropic data (if available)\nconst anthropicData = items.find(i => i.json.source === 'anthropic' || i.json.usage);\nif (anthropicData && anthropicData.json.usage) {\n  const usage = anthropicData.json.usage;\n  \n  // Aggregate by model if detailed breakdown available\n  if (usage.models) {\n    for (const model of usage.models) {\n      tokenRecords.push({\n        workflow_name: 'api_aggregate',\n        provider: 'anthropic',\n        model: model.name,\n        operation_type: 'aggregate',\n        input_tokens: model.input_tokens || 0,\n        output_tokens: model.output_tokens || 0,\n        recorded_at: now,\n        metadata: { source: 'api_usage_endpoint' }\n      });\n    }\n  } else {\n    // Simple aggregate\n    tokenRecords.push({\n      workflow_name: 'api_aggregate',\n      provider: 'anthropic',\n      model: 'claude-sonnet-4',\n      operation_type: 'aggregate',\n      input_tokens: usage.input_tokens || 0,\n      output_tokens: usage.output_tokens || 0,\n      recorded_at: now,\n      metadata: { source: 'api_usage_endpoint' }\n    });\n  }\n}\n\n// Process OpenAI data (if available)\nconst openaiData = items.find(i => i.json.source === 'openai' || i.json.data);\nif (openaiData && openaiData.json.data) {\n  for (const record of openaiData.json.data) {\n    tokenRecords.push({\n      workflow_name: 'api_aggregate',\n      provider: 'openai',\n      model: record.model || 'unknown',\n      operation_type: record.operation || 'aggregate',\n      input_tokens: record.n_context_tokens_total || 0,\n      output_tokens: record.n_generated_tokens_total || 0,\n      recorded_at: now,\n      metadata: { source: 'api_usage_endpoint' }\n    });\n  }\n}\n\n// If no API data available, create placeholder to track the check\nif (tokenRecords.length === 0) {\n  tokenRecords.push({\n    workflow_name: 'token_tracker',\n    provider: 'system',\n    model: 'health_check',\n    operation_type: 'health_check',\n    input_tokens: 0,\n    output_tokens: 0,\n    recorded_at: now,\n    metadata: { note: 'API usage endpoints not available or no usage in period' }\n  });\n}\n\nreturn tokenRecords.map(r => ({ json: r }));"
+      },
+      "id": "process-usage",
+      "name": "Process Usage Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "token_usage",
+        "columns": "workflow_name, provider, model, operation_type, input_tokens, output_tokens, recorded_at, metadata",
+        "options": {}
+      },
+      "id": "insert-token-usage",
+      "name": "Insert Token Usage",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 400],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CRED",
+          "name": "Support Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "query": "SELECT * FROM v_budget_utilization WHERE status IN ('warning', 'critical')",
+        "options": {}
+      },
+      "id": "check-budget-alerts",
+      "name": "Check Budget Alerts",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 400],
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CRED",
+          "name": "Support Database"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-has-alerts",
+              "leftValue": "={{ $json.budget_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "channel": "#support-alerts",
+        "text": "=:warning: *Token Budget Alert*\n\n*Budget:* {{ $json.budget_name }}\n*Provider:* {{ $json.provider }}\n*Status:* {{ $json.status.toUpperCase() }}\n\n*Usage:* {{ Math.round($json.token_utilization_pct) }}% of token limit\n*Cost:* ${{ $json.cost_used.toFixed(2) }} / ${{ $json.cost_limit_usd }}\n\n*Days Remaining:* {{ $json.days_remaining }}\n{{ $json.projected_exhaustion_date ? '*Projected Exhaustion:* ' + $json.projected_exhaustion_date : '' }}\n\n_Review usage patterns and consider adjusting workflows._",
+        "otherOptions": {}
+      },
+      "id": "slack-alert",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1780, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CRED",
+          "name": "Slack Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op",
+      "name": "No Alerts",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1780, 500]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          { "node": "Fetch Anthropic Usage", "type": "main", "index": 0 },
+          { "node": "Fetch OpenAI Usage", "type": "main", "index": 0 },
+          { "node": "Fetch Workflow Stats", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Anthropic Usage": {
+      "main": [
+        [{ "node": "Merge All Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch OpenAI Usage": {
+      "main": [
+        [{ "node": "Merge All Data", "type": "main", "index": 1 }]
+      ]
+    },
+    "Fetch Workflow Stats": {
+      "main": [
+        [{ "node": "Merge All Data", "type": "main", "index": 2 }]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [{ "node": "Process Usage Data", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Usage Data": {
+      "main": [
+        [{ "node": "Insert Token Usage", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insert Token Usage": {
+      "main": [
+        [{ "node": "Check Budget Alerts", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Budget Alerts": {
+      "main": [
+        [{ "node": "Has Alerts?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [{ "node": "Send Slack Alert", "type": "main", "index": 0 }],
+        [{ "node": "No Alerts", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-01-19T00:00:00.000Z",
+  "versionId": "1"
+}
