@@ -174,6 +174,8 @@ Each workflow contains agent prompts in the respective nodes. Customize these ba
 
 **IMPORTANT**: Workflows 2 and 4 require Confluence integration for optimal performance.
 
+**Confluence Space**: KB articles are created in the **PKB** (Projects Knowledge Base) space.
+
 To add Confluence KB search to your workflows:
 
 1. **Set up Confluence** - Follow the [Confluence Integration Guide](../docs/CONFLUENCE-INTEGRATION.md)
@@ -194,6 +196,25 @@ To add Confluence KB search to your workflows:
 5. **Test thoroughly** - Verify KB retrieval improves resolution quality
 
 See `docs/CONFLUENCE-INTEGRATION.md` for detailed implementation steps.
+
+### Workflow 5: Confluence Page Creation
+
+Workflow 5 automatically creates KB articles in Confluence when documentation gaps are identified.
+
+**Required Nodes** (in order):
+1. **Prepare Confluence Content** - Code node that escapes content for JSON
+2. **Create Confluence Page** - HTTP Request (POST) to Confluence REST API
+3. **Add Labels to Page** - HTTP Request (POST) to add tags
+4. **Log to PostgreSQL** - Record article in kb_articles table
+
+**Key Configuration**:
+- Space Key: `PKB`
+- HTTP Authentication: Basic Auth (email + API token)
+- Content must be pre-escaped for JSON (see Troubleshooting section)
+
+**Known Limitations** (tracked in backlog):
+- **DEV-18**: KB Vector Re-indexing not yet implemented
+- **DEV-19**: Duplicate page handling (upsert) not yet implemented
 
 ### NEW: Confluence KB Indexer Workflow
 
@@ -236,6 +257,86 @@ A new workflow has been added for indexing Confluence pages:
 2. **DB connection errors**: Verify PostgreSQL credentials and network access
 3. **AI errors**: Check Anthropic API key and rate limits
 4. **Missing data**: Verify database tables exist with correct schema
+
+### Critical n8n Pattern Issues
+
+These issues were discovered during testing and are critical to understand:
+
+#### 1. Split In Batches Node - Loop vs Done Outputs
+
+The Split In Batches node has TWO outputs:
+- **Output 0 (top/done)**: Fires when ALL items are processed (loop complete)
+- **Output 1 (bottom/loop)**: Fires for EACH batch iteration
+
+**Common Mistake**: Connecting the "done" output to processing nodes instead of "loop"
+
+**Correct Pattern**:
+```
+[Split In Batches]
+    ├── Output 0 (done) → [Nothing or completion logic]
+    └── Output 1 (loop) → [Process Item] → [Back to Split In Batches]
+```
+
+**Affected Workflows**: WF5 (Loop Articles, Loop Bugs)
+
+#### 2. Parallel Queries Require Merge Node Before Code
+
+When multiple queries run in parallel and feed into a Code node, you MUST add a Merge node first.
+
+**Why**: Without Merge, the Code node executes multiple times (once per input) rather than once with all data.
+
+**Correct Pattern**:
+```
+[Query 1] ───┐
+[Query 2] ───┼──→ [Merge Node] → [Code Node]
+[Query 3] ───┤
+[Query 4] ───┘
+```
+
+In the Code node, use `$input.all()` to access all merged items:
+```javascript
+const allItems = $input.all().map(item => item.json);
+```
+
+**Affected Workflows**: WF3, WF5
+
+#### 3. JSON Escaping for HTTP Request Bodies
+
+When using expressions in HTTP Request JSON bodies, content with quotes/newlines breaks JSON parsing.
+
+**Solution**: Pre-escape content in a Code node:
+```javascript
+const jsonSafeContent = content
+  .replace(/\\/g, '\\\\')
+  .replace(/"/g, '\\"')
+  .replace(/\n/g, '\\n')
+  .replace(/\r/g, '\\r')
+  .replace(/\t/g, '\\t');
+```
+
+Then use `{{ $json.escaped_field }}` in the HTTP body (without the `=` prefix).
+
+**Affected Workflows**: WF5 (Create Confluence Page)
+
+#### 4. SQL Expressions with Single Quotes
+
+Using `.replace(/'/g, "''")` in SQL expressions causes syntax errors.
+
+**Solutions**:
+- Use parameterized queries with `$1, $2, $3...` placeholders
+- Or use quadruple quotes: `.replace(/'/g, "''''")`
+
+**Affected Workflows**: WF5 (Log to PostgreSQL)
+
+#### 5. Referencing Upstream Node Data After Transformation
+
+When a node transforms data, use explicit node references to get original data:
+```javascript
+// Get data from a specific upstream node
+const originalData = $('NodeName').first().json;
+```
+
+**Affected Workflows**: WF5 (Prepare Confluence Content referencing Loop Articles)
 
 ### Debug Mode
 

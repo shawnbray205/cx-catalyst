@@ -460,6 +460,17 @@ For Atlassian MCP integration:
 - Cloud ID from Jira admin
 - API token from [id.atlassian.com](https://id.atlassian.com/manage/api-tokens)
 
+#### 8. Confluence HTTP Basic Auth
+
+For Workflow 5 KB article creation:
+
+- **Name:** `Confluence HTTP Basic Auth`
+- **Type:** HTTP Basic Auth
+- **User:** Your Atlassian email address
+- **Password:** API token from [id.atlassian.com](https://id.atlassian.com/manage/api-tokens)
+
+**Note:** This is used by HTTP Request nodes for Confluence REST API calls (not the dedicated Confluence nodes).
+
 ---
 
 ## Workflow Deployment
@@ -881,6 +892,47 @@ Always use:
 2. Check embedding dimensions match (1536)
 3. Test query manually in Supabase
 4. Verify similarity threshold isn't too high
+
+#### n8n Expression/JSON Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "JSON parameter needs to be valid JSON" | Unescaped quotes/newlines in HTTP body | Pre-escape content in Code node (see below) |
+| "Cannot read properties of undefined" | Wrong node reference after data transformation | Use `$('NodeName').first().json` to reference specific upstream node |
+| "syntax error at or near" in SQL | Single quotes in expressions | Use parameterized queries or quadruple-escape quotes |
+| Split In Batches processes all at once | Wrong output connected | Connect "loop" output (index 1) to processing node, not "done" (index 0) |
+| Code node runs multiple times | Parallel inputs without Merge | Add Merge node before Code node for parallel query results |
+
+**JSON Escaping Pattern** (for HTTP Request bodies):
+```javascript
+// In Code node before HTTP Request
+const jsonSafeContent = content
+  .replace(/\\/g, '\\\\')
+  .replace(/"/g, '\\"')
+  .replace(/\n/g, '\\n')
+  .replace(/\r/g, '\\r')
+  .replace(/\t/g, '\\t');
+
+return { json: { escaped_content: jsonSafeContent } };
+```
+
+Then in HTTP Request, use `{{ $json.escaped_content }}` (without `=` prefix).
+
+#### Confluence API Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Space does not exist" | Wrong space key | Verify space key exists (e.g., PKB, CS, ER) |
+| "A page with this title already exists" | Duplicate title in space | Implement upsert logic (DEV-19) or delete existing page |
+| 401 Unauthorized | Invalid credentials | Check HTTP Basic Auth: email + API token from id.atlassian.com |
+
+#### Jira API Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Project not found" | Wrong project key | Verify project key (e.g., DEV, SUP) |
+| "Issue type not found" | Invalid issue type | Check issue type name matches exactly (Bug, Story, Task) |
+| Field validation errors | Missing required fields | Use getJiraIssueTypeMetaWithFields to check required fields |
 
 ### Debug Mode
 

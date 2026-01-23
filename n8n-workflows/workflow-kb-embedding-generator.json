@@ -1,0 +1,247 @@
+{
+  "name": "KB Article Embedding Generator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT article_id, title, category, subcategory, content, tags\nFROM kb_articles\nWHERE embedding IS NULL\n  AND content IS NOT NULL\n  AND content != ''\nLIMIT 50;",
+        "options": {}
+      },
+      "id": "fetch-articles",
+      "name": "Fetch Articles Without Embeddings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-articles",
+              "leftValue": "={{ $json.article_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-has-articles",
+      "name": "Has Articles?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare text for embedding\nconst article = $input.item.json;\n\n// Combine title, category, tags, and content for rich embedding\nconst textForEmbedding = [\n  `Title: ${article.title}`,\n  `Category: ${article.category}/${article.subcategory}`,\n  `Tags: ${(article.tags || []).join(', ')}`,\n  `Content: ${article.content}`\n].join('\\n\\n');\n\nreturn {\n  json: {\n    article_id: article.article_id,\n    title: article.title,\n    text_for_embedding: textForEmbedding\n  }\n};"
+      },
+      "id": "prepare-text",
+      "name": "Prepare Text for Embedding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": {{ JSON.stringify($json.text_for_embedding) }},\n  \"model\": \"text-embedding-3-small\"\n}",
+        "options": {}
+      },
+      "id": "generate-embedding",
+      "name": "Generate Embedding (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract embedding from OpenAI response\nconst article_id = $('Prepare Text for Embedding').item.json.article_id;\nconst title = $('Prepare Text for Embedding').item.json.title;\nconst response = $input.item.json;\n\nconst embedding = response.data?.[0]?.embedding;\n\nif (!embedding) {\n  throw new Error(`Failed to get embedding for article: ${title}`);\n}\n\n// Format embedding as PostgreSQL array\nconst embeddingArray = '[' + embedding.join(',') + ']';\n\nreturn {\n  json: {\n    article_id: article_id,\n    title: title,\n    embedding: embeddingArray,\n    embedding_length: embedding.length\n  }\n};"
+      },
+      "id": "extract-embedding",
+      "name": "Extract Embedding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE kb_articles\nSET embedding = '{{ $json.embedding }}'::vector,\n    updated_at = NOW()\nWHERE article_id = '{{ $json.article_id }}';",
+        "options": {}
+      },
+      "id": "update-embedding",
+      "name": "Update Article with Embedding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Count processed articles\nconst items = $input.all();\n\nreturn {\n  json: {\n    success: true,\n    articles_processed: items.length,\n    message: `Successfully generated embeddings for ${items.length} articles`\n  }\n};"
+      },
+      "id": "summary",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No articles to process\nreturn {\n  json: {\n    success: true,\n    articles_processed: 0,\n    message: 'No articles found without embeddings'\n  }\n};"
+      },
+      "id": "no-articles",
+      "name": "No Articles to Process",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "content": "## KB Article Embedding Generator\n\n**Purpose:** Generate vector embeddings for KB articles to enable semantic search.\n\n### How it works:\n1. Fetches articles without embeddings from the database\n2. Prepares text combining title, category, tags, and content\n3. Calls OpenAI API to generate embeddings (text-embedding-3-small)\n4. Updates the article with the embedding vector\n\n### Usage:\n- Run manually to process new articles\n- Or schedule to run periodically\n\n### Configuration:\n- OpenAI API credential required\n- PostgreSQL credential (cx-catalyst)\n- Processes up to 50 articles per run\n\n### Notes:\n- Uses text-embedding-3-small (1536 dimensions)\n- Estimated cost: ~$0.00002 per article",
+        "height": 380,
+        "width": 320
+      },
+      "id": "sticky-note",
+      "name": "Workflow Info",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [0, 160]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Articles Without Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Articles Without Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Has Articles?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Articles?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Text for Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Articles to Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Text for Embedding": {
+      "main": [
+        [
+          {
+            "node": "Generate Embedding (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Embedding (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Extract Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Embedding": {
+      "main": [
+        [
+          {
+            "node": "Update Article with Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Article with Embedding": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "kb"
+    },
+    {
+      "name": "embeddings"
+    },
+    {
+      "name": "maintenance"
+    }
+  ],
+  "meta": {
+    "instanceId": "cx-catalyst"
+  }
+}

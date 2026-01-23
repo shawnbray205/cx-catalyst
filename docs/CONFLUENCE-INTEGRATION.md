@@ -192,8 +192,10 @@ $$;
 
 Create a dedicated Confluence space for support knowledge:
 
-**Space Key**: `SUPPORT` or `KB`
-**Space Name**: `Support Knowledge Base`
+**Space Key**: `PKB` (Projects Knowledge Base)
+**Space Name**: `Projects Knowledge Base`
+
+> **Note**: The CX-Catalyst system uses the `PKB` space for AI-generated KB articles. Ensure this space exists before running Workflow 5.
 
 ```
 Support Knowledge Base
@@ -435,7 +437,7 @@ Create a new workflow: **Confluence KB Indexer**
 **1. Confluence: Get Pages**
 ```json
 {
-  "space": "SUPPORT",
+  "space": "PKB",
   "limit": 100,
   "expand": "body.storage,version,metadata.labels"
 }
@@ -655,25 +657,60 @@ Create a KB article using this template:
 Format the output as Confluence storage format (HTML).
 ```
 
-**Node: Confluence - Create Page**
+**Node: HTTP Request - Create Confluence Page**
+
+> **Important**: Use HTTP Request node with Basic Auth, not the dedicated Confluence node. Pre-escape content in a Code node first.
+
+**Code Node: Prepare Confluence Content**
+```javascript
+// Pre-escape content for JSON embedding
+const jsonSafeContent = content
+  .replace(/\\/g, '\\\\')
+  .replace(/"/g, '\\"')
+  .replace(/\n/g, '\\n')
+  .replace(/\r/g, '\\r')
+  .replace(/\t/g, '\\t');
+
+return {
+  json: {
+    article_content_escaped: jsonSafeContent,
+    article_title_escaped: title.replace(/"/g, '\\"')
+  }
+};
+```
+
+**HTTP Request Node Configuration:**
+- Method: POST
+- URL: `https://your-company.atlassian.net/wiki/rest/api/content`
+- Authentication: HTTP Basic Auth (email + API token)
+- Body (JSON - without `=` prefix):
 ```json
 {
-  "spaceKey": "SUPPORT",
-  "title": "{{ $json.suggested_title }}",
   "type": "page",
+  "title": "{{ $json.article_title_escaped }}",
+  "space": {
+    "key": "PKB"
+  },
   "body": {
     "storage": {
-      "value": "{{ $json.article_content }}",
+      "value": "{{ $json.article_content_escaped }}",
       "representation": "storage"
     }
   },
-  "metadata": {
-    "labels": [
-      {"prefix": "global", "name": "ai-generated"},
-      {"prefix": "global", "name": "category:{{ $json.category }}"}
-    ]
-  }
+  "status": "current"
 }
+```
+
+**Add Labels Node (HTTP Request):**
+- Method: POST
+- URL: `https://your-company.atlassian.net/wiki/rest/api/content/{{ $json.id }}/label`
+- Body:
+```json
+[
+  {"prefix": "global", "name": "ai-generated"},
+  {"prefix": "global", "name": "kb-article"},
+  {"prefix": "global", "name": "needs-review"}
+]
 ```
 
 #### Re-index New Pages

@@ -1,0 +1,1306 @@
+{
+  "name": "Support - 2. Self-Service Resolution Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support/self-service",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "20989c43-c671-42b1-8e74-4c98e69462d7",
+      "name": "Webhook - Self-Service",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -640,
+        448
+      ],
+      "webhookId": "support-self-service-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract case data from incoming request\nconst input = $input.item.json;\n\n// Handle both direct body and nested body scenarios\nconst caseData = input.body || input;\n\n// Check if data is coming from Workflow 1 (has classification) or direct test (has issue/triage)\nconst isFromWorkflow1 = caseData.classification !== undefined;\n\n// Map the structure to flat structure for downstream nodes\nreturn {\n  json: {\n    case_id: caseData.case_id,\n    customer_id: caseData.customer_id || caseData.customer_context?.customer_id,\n    request_id: caseData.request_id,\n    description: isFromWorkflow1 \n      ? caseData.description \n      : (caseData.issue?.description || caseData.description),\n    classification: isFromWorkflow1\n      ? {\n          category: caseData.classification.category,\n          subcategory: caseData.classification.subcategory,\n          priority: caseData.classification.priority,\n          estimated_complexity: caseData.classification.estimated_complexity\n        }\n      : {\n          category: caseData.issue?.category || caseData.classification?.category,\n          subcategory: caseData.issue?.subcategory || caseData.classification?.subcategory,\n          priority: caseData.triage?.priority || caseData.classification?.priority,\n          estimated_complexity: caseData.triage?.complexity || caseData.classification?.estimated_complexity\n        },\n    customer_context: caseData.customer_context,\n    product: caseData.product,\n    product_version: caseData.product_version,\n    environment: caseData.environment,\n    channel: caseData.channel,\n    received_at: caseData.received_at,\n    triaged_at: caseData.triaged_at,\n    self_service_started_at: new Date().toISOString()\n  }\n};\n"
+      },
+      "id": "00eb6a60-9d4c-411d-9228-dc7ac8d69a34",
+      "name": "Extract Case Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  c.case_id,\n  c.description,\n  c.category,\n  c.subcategory,\n  c.resolution_type,\n  ci.message as solution,\n  c.satisfaction_score\nFROM cases c\nJOIN case_interactions ci ON c.case_id = ci.case_id\nWHERE c.status = 'resolved'\n  AND c.category = '{{ $json.classification.category }}'\n  AND ci.interaction_type = 'solution'\n  AND c.satisfaction_score >= 4\nORDER BY c.resolved_at DESC\nLIMIT 5;",
+        "options": {}
+      },
+      "id": "063788e1-87f7-4551-a488-11ab731b3e00",
+      "name": "Find Similar Resolved Cases",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -192,
+        544
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "knowledge_base_search",
+        "toolDescription": "Search the knowledge base for relevant articles and documentation about the customer issue",
+        "tableName": {
+          "__rl": true,
+          "value": "kb_articles",
+          "mode": "list",
+          "cachedResultName": "kb_articles"
+        },
+        "options": {}
+      },
+      "id": "5d63432c-a0aa-440f-9e98-ce8b5e48adbb",
+      "name": "KB Vector Search",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [
+        608,
+        464
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "oW2iCPont2xp5tXP",
+          "name": "Supabase API - CX-Catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "35c49611-6a7c-4443-936d-752d62ba1cf7",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        688,
+        672
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "x6T6BlWTbq0xsdSm",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge all knowledge sources into a single item\nconst allItems = $input.all();\n\n// Get case data from Extract Case Data node\nlet caseData = {};\ntry {\n  caseData = $('Extract Case Data').first().json;\n} catch (e) {\n  console.log('Could not access Extract Case Data node');\n}\n\n// Process input items from Merge Search\nconst kbArticles = [];\nconst similarCases = [];\n\nfor (const item of allItems) {\n  const data = item.json;\n  \n  if (data.article_id) {\n    kbArticles.push(data);\n  } else if (data.case_id && data.solution) {\n    similarCases.push(data);\n  }\n}\n\n// Ensure description exists\nconst description = caseData.description || 'No description provided';\n\nreturn [{\n  json: {\n    case_id: caseData.case_id || null,\n    request_id: caseData.request_id || null,\n    description: description,\n    classification: caseData.classification || {},\n    customer_context: caseData.customer_context || {},\n    product: caseData.product || null,\n    product_version: caseData.product_version || null,\n    environment: caseData.environment || 'production',\n    channel: caseData.channel || null,\n    received_at: caseData.received_at || null,\n    triaged_at: caseData.triaged_at || null,\n    self_service_started_at: caseData.self_service_started_at || new Date().toISOString(),\n    knowledge_context: {\n      kb_articles: kbArticles,\n      similar_cases: similarCases,\n      has_automated_fix: kbArticles.some(a => a.metadata?.automated_fix_available)\n    }\n  }\n}];\n"
+      },
+      "id": "83c5a9af-8fe8-420b-b091-cf5e72902970",
+      "name": "Merge Knowledge Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"solution_steps\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" },\n      \"description\": \"Step-by-step resolution instructions\"\n    },\n    \"diagnostic_commands\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" },\n      \"description\": \"Commands to diagnose and verify the issue\"\n    },\n    \"automated_fix_available\": {\n      \"type\": \"boolean\",\n      \"description\": \"Whether an automated fix can be applied\"\n    },\n    \"automation_script_name\": {\n      \"type\": \"string\",\n      \"description\": \"Name of the automation script if available\"\n    },\n    \"estimated_time\": {\n      \"type\": \"number\",\n      \"description\": \"Estimated resolution time in minutes\"\n    },\n    \"confidence\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"maximum\": 1,\n      \"description\": \"Confidence in the solution (0-1)\"\n    },\n    \"references\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"type\": { \"type\": \"string\" },\n          \"id\": { \"type\": \"string\" },\n          \"title\": { \"type\": \"string\" }\n        }\n      },\n      \"description\": \"Source references for the solution\"\n    },\n    \"risks\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" },\n      \"description\": \"Any risks involved in applying the solution\"\n    },\n    \"requires_approval\": {\n      \"type\": \"boolean\",\n      \"description\": \"Whether customer approval is needed before proceeding\"\n    },\n    \"reasoning\": {\n      \"type\": \"string\",\n      \"description\": \"Why this solution addresses the issue\"\n    },\n    \"fallback_solution\": {\n      \"type\": \"string\",\n      \"description\": \"Alternative approach if primary solution fails\"\n    }\n  },\n  \"required\": [\"solution_steps\", \"estimated_time\", \"confidence\", \"reasoning\", \"requires_approval\"]\n}"
+      },
+      "id": "794c3ef2-c3f2-4e1a-bf2b-763209d64218",
+      "name": "Solution Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        896,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine case data with generated solution\nconst caseData = $('Merge Knowledge Sources').first().json;\nconst solution = $input.item.json.output || $input.item.json;\n\nreturn {\n  json: {\n    ...caseData,\n    solution: {\n      steps: solution.solution_steps || [],\n      diagnostic_commands: solution.diagnostic_commands || [],\n      automated_fix_available: solution.automated_fix_available || false,\n      automation_script_name: solution.automation_script_name,\n      estimated_time: solution.estimated_time || 15,\n      confidence: solution.confidence || 0.7,\n      references: solution.references || [],\n      risks: solution.risks || [],\n      requires_approval: solution.requires_approval || false,\n      reasoning: solution.reasoning,\n      fallback_solution: solution.fallback_solution\n    },\n    solution_generated_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "5573ff2e-550d-4c10-b05c-6432472a45b0",
+      "name": "Combine Solution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-approval",
+              "leftValue": "={{ $json.solution.requires_approval }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "78ecf27c-158f-4ba5-a1b5-7b48c7ea53c1",
+      "name": "Requires Approval?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1328,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'awaiting_approval',\n    metadata = metadata || '{\"solution_pending\": true, \"solution_generated_at\": \"{{ $(\"Combine Solution\").item.json.solution_generated_at }}\"}'::jsonb\nWHERE case_id = '{{ $(\"Combine Solution\").item.json.case_id }}';\n",
+        "options": {}
+      },
+      "id": "ac686005-4dcf-4d78-b40d-a99c1791c154",
+      "name": "Update Awaiting Approval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        352
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format solution for customer-friendly HTML presentation\nconst data = $('Combine Solution').first().json;\nconst solution = data.solution || {};\n\nlet formattedSolution = `\n<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n  <h2 style=\"color: #1a56db;\">Solution for Your Issue</h2>\n  <p><strong>Estimated Time:</strong> ${solution.estimated_time || 15} minutes</p>\n  \n  <h3 style=\"color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">Steps to Resolve</h3>\n  <ol style=\"line-height: 1.8;\">\n`;\n\n(solution.steps || []).forEach((step) => {\n  formattedSolution += `    <li style=\"margin-bottom: 8px;\">${step}</li>\\n`;\n});\n\nformattedSolution += `  </ol>`;\n\nif (solution.diagnostic_commands && solution.diagnostic_commands.length > 0) {\n  formattedSolution += `\n  <h3 style=\"color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">Diagnostic Commands</h3>\n  <pre style=\"background-color: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px;\">`;\n  solution.diagnostic_commands.forEach(cmd => {\n    formattedSolution += `${cmd}\\n`;\n  });\n  formattedSolution += `</pre>`;\n}\n\nif (solution.risks && solution.risks.length > 0) {\n  formattedSolution += `\n  <h3 style=\"color: #dc2626; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">⚠️ Important Notes</h3>\n  <ul style=\"line-height: 1.8;\">`;\n  solution.risks.forEach(risk => {\n    formattedSolution += `    <li style=\"color: #b91c1c;\">${risk}</li>\\n`;\n  });\n  formattedSolution += `  </ul>`;\n}\n\nif (solution.automated_fix_available) {\n  formattedSolution += `\n  <div style=\"background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 16px; margin: 16px 0;\">\n    <h3 style=\"color: #92400e; margin-top: 0;\">🔧 Automated Fix Available</h3>\n    <p>We can automatically apply a fix for this issue. Would you like us to proceed?</p>\n    <p><strong>To approve:</strong> Click the approval link below.</p>\n  </div>`;\n}\n\nif (solution.references && solution.references.length > 0) {\n  formattedSolution += `\n  <h3 style=\"color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">📚 Related Documentation</h3>\n  <ul style=\"line-height: 1.8;\">`;\n  solution.references.forEach(ref => {\n    formattedSolution += `    <li>${ref.title || ref.type}: ${ref.id}</li>\\n`;\n  });\n  formattedSolution += `  </ul>`;\n}\n\nformattedSolution += `</div>`;\n\nreturn {\n  json: {\n    ...data,\n    solution: solution,\n    formatted_solution: formattedSolution,\n    approval_url: `https://sbray205.app.n8n.cloud/webhook/support-approval-webhook/support/approve/${data.case_id}`,\n    decline_url: `https://sbray205.app.n8n.cloud/webhook/support-approval-webhook/support/decline/${data.case_id}`\n  }\n};\n"
+      },
+      "id": "c0436658-7bd3-4fec-9046-4ed751e82cb5",
+      "name": "Format For Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $(\"Format For Approval\").item.json.customer_context.email }}\n",
+        "subject": "=Support Case #{{ $json.case_id }}: Solution Ready for Your Review",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n  <p>Dear {{ $(\"Format For Approval\").item.json.customer_context.name }},</p>\n  \n  <p>We've analyzed your support request and have a solution ready.</p>\n  \n  <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;\">\n  \n  {{ $(\"Format For Approval\").item.json.formatted_solution }}\n  \n  <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;\">\n  \n  <div style=\"background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 16px; margin: 16px 0;\">\n    <h3 style=\"color: #92400e; margin-top: 0;\">Approval Required</h3>\n    <p>Before we can proceed with any automated fixes or major changes, we need your approval.</p>\n    \n    <div style=\"margin-top: 16px;\">\n      <a href=\"{{ $(\"Format For Approval\").item.json.approval_url }}\" style=\"background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-right: 12px; margin-bottom: 8px;\">✅ Approve Solution</a>\n      <a href=\"{{ $(\"Format For Approval\").item.json.decline_url }}\" style=\"background-color: #ef4444; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;\">❌ Decline / Request Changes</a>\n    </div>\n  </div>\n  \n  <div style=\"background-color: #f3f4f6; border-radius: 6px; padding: 16px; margin: 16px 0;\">\n    <h4 style=\"margin-top: 0; color: #374151;\">Case Details</h4>\n    <ul style=\"margin: 0; padding-left: 20px; line-height: 1.8;\">\n      <li><strong>Case ID:</strong> {{ $(\"Format For Approval\").item.json.case_id }}</li>\n      <li><strong>Category:</strong> {{ $(\"Format For Approval\").item.json.classification.category }}</li>\n      <li><strong>Priority:</strong> {{ $(\"Format For Approval\").item.json.classification.priority }}</li>\n    </ul>\n  </div>\n  \n  <p>If you have questions, simply reply to this email.</p>\n  \n  <p>Best regards,<br>Support Team</p>\n</div>\n",
+        "options": {}
+      },
+      "id": "62c7d33d-35d4-4009-9f07-b83138dd1e09",
+      "name": "Send Approval Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        352
+      ],
+      "webhookId": "e65d2fb5-6a85-4db0-97e6-40424ad1707d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "FD4ccXskpie7ZLhN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  case_id: $(\"Format For Approval\").item.json.case_id,\n  status: \"awaiting_approval\",\n  message: \"Solution generated. Customer notified for approval.\",\n  solution_summary: {\n    estimated_time: $(\"Format For Approval\").item.json.solution.estimated_time || 0,\n    confidence: $(\"Format For Approval\").item.json.solution.confidence || 0,\n    automated_fix_available: $(\"Format For Approval\").item.json.solution.automated_fix_available || false\n  }\n}, null, 2) }}\n\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "cbd636e1-d570-47a0-b7ef-5fb42e109c42",
+      "name": "Respond - Approval Needed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2224,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'in_progress',\n    metadata = metadata || '{{ JSON.stringify({ solution_started_at: new Date().toISOString() }) }}'::jsonb\nWHERE case_id = '{{ $json.case_id }}';",
+        "options": {}
+      },
+      "id": "f31b5141-a94f-4ed8-9c36-15576cd6d106",
+      "name": "Update In Progress",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format solution for direct delivery as HTML\nconst combineData = $('Combine Solution').first().json;\nconst data = combineData || $input.item.json;\nconst solution = data.solution || {};\n\nif (!solution.steps || solution.steps.length === 0) {\n  return {\n    json: {\n      ...data,\n      solution: solution,\n      formatted_solution: `<div style=\"font-family: Arial, sans-serif;\"><h2>We're Looking Into Your Issue</h2><p>Our team is reviewing your request and will provide a solution shortly.</p><p><strong>Case ID:</strong> ${data.case_id || 'Unknown'}</p></div>`,\n      feedback_url: `https://sbray205.app.n8n.cloud/webhook/support-feedback-webhook/support/feedback/${data.case_id}`\n    }\n  };\n}\n\nlet formattedSolution = `\n<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n  <h2 style=\"color: #1a56db;\">Solution for Your Issue</h2>\n  <p><strong>Estimated Time:</strong> ${solution.estimated_time || 15} minutes</p>\n  \n  <h3 style=\"color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">Steps to Resolve</h3>\n  <ol style=\"line-height: 1.8;\">\n`;\n\n(solution.steps || []).forEach((step) => {\n  formattedSolution += `    <li style=\"margin-bottom: 8px;\">${step}</li>\\n`;\n});\n\nformattedSolution += `  </ol>`;\n\nif (solution.diagnostic_commands && solution.diagnostic_commands.length > 0) {\n  formattedSolution += `\n  <h3 style=\"color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">Diagnostic Commands</h3>\n  <pre style=\"background-color: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px;\">`;\n  solution.diagnostic_commands.forEach(cmd => {\n    formattedSolution += `${cmd}\\n`;\n  });\n  formattedSolution += `</pre>`;\n}\n\nif (solution.references && solution.references.length > 0) {\n  formattedSolution += `\n  <h3 style=\"color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;\">📚 Related Documentation</h3>\n  <ul style=\"line-height: 1.8;\">`;\n  solution.references.forEach(ref => {\n    formattedSolution += `    <li>${ref.title || ref.type}: ${ref.id}</li>\\n`;\n  });\n  formattedSolution += `  </ul>`;\n}\n\nformattedSolution += `\n  <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;\">\n  <p>If this solution resolves your issue, please let us know!</p>\n  <p>If you need further assistance, simply reply to this message.</p>\n</div>`;\n\nreturn {\n  json: {\n    ...data,\n    solution: solution,\n    formatted_solution: formattedSolution,\n    feedback_url: `https://sbray205.app.n8n.cloud/webhook/support-feedback-webhook/support/feedback/${data.case_id}`\n  }\n};\n"
+      },
+      "id": "b81822c9-693a-49d9-9529-9fb5cb22cade",
+      "name": "Format Direct Solution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $(\"Format Direct Solution\").item.json.customer_context.email }}\n",
+        "subject": "=Support Case #{{ $json.case_id }}: Solution Ready",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n  <p>Dear {{ $(\"Format Direct Solution\").item.json.customer_context.name }},</p>\n  \n  <p>Thank you for contacting support. We've analyzed your issue and prepared a solution for you.</p>\n  \n  <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;\">\n  \n  {{ $(\"Format Direct Solution\").item.json.formatted_solution }}\n  \n  <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;\">\n  \n  <div style=\"background-color: #f3f4f6; border-radius: 6px; padding: 16px; margin: 16px 0;\">\n    <h4 style=\"margin-top: 0; color: #374151;\">Case Details</h4>\n    <ul style=\"margin: 0; padding-left: 20px; line-height: 1.8;\">\n      <li><strong>Case ID:</strong> {{ $(\"Format Direct Solution\").item.json.case_id }}</li>\n      <li><strong>Category:</strong> {{ $(\"Format Direct Solution\").item.json.classification.category }}</li>\n      <li><strong>Priority:</strong> {{ $(\"Format Direct Solution\").item.json.classification.priority }}</li>\n    </ul>\n  </div>\n  \n  <div style=\"background-color: #ecfdf5; border: 1px solid #10b981; border-radius: 6px; padding: 16px; margin: 16px 0;\">\n    <h4 style=\"margin-top: 0; color: #065f46;\">Did this help?</h4>\n    <div style=\"margin-top: 12px;\">\n      <a href=\"{{ $(\"Format Direct Solution\").item.json.feedback_url }}?resolved=true\" style=\"background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-right: 12px; margin-bottom: 8px;\">✅ Yes, issue resolved!</a>\n      <a href=\"{{ $(\"Format Direct Solution\").item.json.feedback_url }}?resolved=false\" style=\"background-color: #6b7280; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;\">❌ No, I need more help</a>\n    </div>\n  </div>\n  \n  <p>Best regards,<br>Support Team</p>\n</div>\n\n",
+        "options": {}
+      },
+      "id": "8ff521b7-24d0-47d3-809c-d36b6b717433",
+      "name": "Send Solution Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        544
+      ],
+      "webhookId": "81299f15-6a7d-49d7-a1e0-3d605dfcb7d9",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "FD4ccXskpie7ZLhN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO case_interactions (\n  case_id,\n  actor_type,\n  actor_id,\n  message,\n  interaction_type,\n  metadata\n) VALUES (\n  '{{ $(\"Combine Solution\").item.json.case_id }}',\n  'system',\n  'self-service-agent',\n  $tag${{ $(\"Format Direct Solution\").item.json.formatted_solution }}$tag$,\n  'solution',\n  '{{ JSON.stringify({ confidence: $(\"Combine Solution\").item.json.solution?.confidence || 0, estimated_time: $(\"Combine Solution\").item.json.solution?.estimated_time || 0 }) }}'::jsonb\n);\n",
+        "options": {}
+      },
+      "id": "b991f15f-4cb1-42a7-8d6e-b59401d98ddd",
+      "name": "Log Solution",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2224,
+        544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  case_id: $json.case_id,\n  status: 'solution_delivered',\n  message: 'Solution delivered to customer.',\n  solution_summary: {\n    estimated_time: $json.solution.estimated_time,\n    confidence: $json.solution.confidence,\n    steps_count: $json.solution.steps.length\n  }\n}, null, 2) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "dd5f36a1-1fcf-474d-8de5-a7cacc6ffb64",
+      "name": "Respond - Solution Delivered",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2448,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "path": "support/approve/:caseId",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "ea06e986-bfe5-410a-8a1e-518edad25d01",
+      "name": "Webhook - Approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -640,
+        976
+      ],
+      "webhookId": "support-approval-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract case ID from URL params\nconst caseId = $input.item.json.params?.caseId || $input.item.json.caseId;\n\nreturn {\n  json: {\n    case_id: caseId,\n    action: 'approved',\n    approved_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "290bb7be-cd7d-4c40-9084-102ad2c8cbbf",
+      "name": "Parse Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  c.*,\n  c.metadata->>'solution_pending' as has_pending_solution\nFROM cases c\nWHERE c.case_id = '{{ $json.case_id }}'\n  AND c.status = 'awaiting_approval';",
+        "options": {}
+      },
+      "id": "54771bc0-2379-402d-b180-38cadd67d3b8",
+      "name": "Fetch Pending Case",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -192,
+        976
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-valid-case",
+              "leftValue": "={{ $json.case_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ce53b2ba-e240-4c56-8efe-bb3d7b265634",
+      "name": "Valid Case?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        32,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'executing_fix',\n    metadata = metadata || '{{ JSON.stringify({ approved_at: new Date().toISOString() }) }}'::jsonb\nWHERE case_id = '{{ $('Parse Approval').first().json.case_id }}';",
+        "options": {}
+      },
+      "id": "af012a8c-bd96-494d-96b3-f07a3f9e4747",
+      "name": "Mark Approved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        256,
+        880
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// In a real implementation, this would call an API to execute the fix\n// For now, we simulate the fix execution\n\nconst caseData = $input.item.json;\n\n// Simulate fix execution\nconst executionResult = {\n  success: true,\n  executed_at: new Date().toISOString(),\n  output: 'Fix applied successfully. Please verify the issue is resolved.',\n  verification_steps: [\n    'Check system status',\n    'Verify configuration',\n    'Test the affected functionality'\n  ]\n};\n\nreturn {\n  json: {\n    case_id: $('Parse Approval').first().json.case_id,\n    execution_result: executionResult\n  }\n};"
+      },
+      "id": "5cec0ef3-8555-43a7-9903-a1f9f130937b",
+      "name": "Execute Automated Fix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'resolved',\n    resolution_type = 'self-service-automated',\n    resolved_at = NOW(),\n    resolution_time_minutes = EXTRACT(EPOCH FROM (NOW() - created_at))/60\nWHERE case_id = '{{ $json.case_id }}';",
+        "options": {}
+      },
+      "id": "34878b51-1c14-48df-87e5-4fe2a942e475",
+      "name": "Mark Resolved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        704,
+        880
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}\n\n\n\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "cff90fb9-941e-4505-a046-f4b6ed1e1736",
+      "name": "Approval Success Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1152,
+        880
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Invalid Request</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }\n    .error { color: #dc2626; }\n  </style>\n</head>\n<body>\n  <h1 class=\"error\">❌ Invalid or Expired Request</h1>\n  <p>This approval link is no longer valid. The case may have already been processed or the link has expired.</p>\n  <p>Please contact support if you need assistance.</p>\n</body>\n</html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d88494d4-39ec-4f70-b4e0-737d8b056c47",
+      "name": "Invalid Approval Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        256,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "path": "support/feedback/:caseId",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3dcc6b9c-7ece-46b5-b317-0e403d91ef07",
+      "name": "Webhook - Feedback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -640,
+        1392
+      ],
+      "webhookId": "support-feedback-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse feedback from URL params\nconst caseId = $input.item.json.params?.caseId;\nconst resolved = $input.item.json.query?.resolved === 'true';\n\nreturn {\n  json: {\n    case_id: caseId,\n    resolved: resolved,\n    feedback_received_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "89f8a8fd-a7a3-4384-a9f4-fae43c787e81",
+      "name": "Parse Feedback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-resolved",
+              "leftValue": "={{ $json.resolved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "45fec0ea-3b03-4485-8096-95d087b4a6e5",
+      "name": "Issue Resolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -192,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'resolved',\n    resolution_type = 'self-service-manual',\n    resolved_at = NOW(),\n    resolution_time_minutes = EXTRACT(EPOCH FROM (NOW() - created_at))/60\nWHERE case_id = '{{ $json.case_id }}';",
+        "options": {}
+      },
+      "id": "c8fb09e2-fe8a-4dbf-a213-e017264ba57d",
+      "name": "Mark Resolved (Feedback)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        32,
+        1296
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "4aba88df-5893-4e41-b83a-cad2fa3ae577",
+      "name": "Feedback - Resolved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        480,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sbray205.app.n8n.cloud/webhook/support/collaborative\n",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ case_id: $json.case_id, escalation_reason: 'customer_feedback_unresolved' }) }}",
+        "options": {}
+      },
+      "id": "cee8af9a-2b33-4768-a41f-2796e54f6890",
+      "name": "Escalate to Collaborative",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        32,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "bd9c3056-122b-4aeb-9ffb-4e31a0c33a61",
+      "name": "Feedback - Escalated",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        480,
+        1488
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 2: Self-Service Resolution Engine\n\n**Purpose:** Automatically resolve common issues using knowledge base, AI reasoning, and optional automated remediation.\n\n### Flow:\n1. Receive case from Triage workflow\n2. Search knowledge sources:\n   - Error codes database\n   - Similar resolved cases\n   - Vector store (KB articles)\n3. AI generates solution\n4. Route based on approval needs:\n   - Requires approval → Email with approve/decline\n   - No approval → Direct solution delivery\n5. Handle customer feedback\n6. Escalate if needed\n\n### Webhook Endpoints:\n- `/support/self-service` - Main entry\n- `/support/approve/:caseId` - Approval handler\n- `/support/feedback/:caseId` - Feedback handler\n\n### Configuration Required:\n- PostgreSQL credentials\n- Supabase credentials\n- Anthropic (Claude) credentials\n- OpenAI credentials (embeddings)\n- Gmail credentials",
+        "height": 904,
+        "width": 360
+      },
+      "id": "b277e06b-93f9-4d47-9129-d74cef57a8b6",
+      "name": "Workflow Info",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1168,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-5-20250929",
+          "cachedResultName": "Claude Sonnet 4.5"
+        },
+        "options": {
+          "maxTokensToSample": 4096,
+          "temperature": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        480,
+        464
+      ],
+      "id": "25820b51-6b9f-44c2-b274-19d014969e0a",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "caOZqcSKNqvrFPhu",
+          "name": "Anthropic API cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  article_id,\n  title,\n  category,\n  subcategory,\n  content,\n  tags,\n  metadata\nFROM kb_articles\nWHERE \n  category ILIKE '%{{ $json.classification.category }}%'\n  OR subcategory ILIKE '%{{ $json.classification.subcategory }}%'\n  OR title ILIKE '%{{ $json.classification.subcategory }}%'\nLIMIT 5;\n",
+        "options": {}
+      },
+      "id": "69dd344b-1030-4fa6-85f2-a9c6bfdc81b5",
+      "name": "Search Knowledge Base",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -192,
+        352
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        32,
+        448
+      ],
+      "id": "5e2bd6d4-6111-4e7f-8106-490d26500a58",
+      "name": "Merge Search"
+    },
+    {
+      "parameters": {
+        "jsCode": "const caseId = $('Parse Approval').first().json.case_id;\nconst executionResult = $('Execute Automated Fix').first().json.execution_result;\n\nconst html = `<!DOCTYPE html>\n<html>\n<head>\n  <title>Fix Applied Successfully</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }\n    .success { color: #059669; }\n    .card { background: #f9fafb; border-radius: 8px; padding: 20px; margin: 20px 0; }\n  </style>\n</head>\n<body>\n  <h1 class=\"success\">✅ Fix Applied Successfully!</h1>\n  <div class=\"card\">\n    <h3>Case #${caseId}</h3>\n    <p>The automated fix has been applied to your system.</p>\n    <p><strong>What happened:</strong></p>\n    <p>${executionResult.output}</p>\n    <h4>Please verify:</h4>\n    <ul>\n      <li>Check system status</li>\n      <li>Verify configuration</li>\n      <li>Test the affected functionality</li>\n    </ul>\n  </div>\n  <p>If you continue to experience issues, please reply to the support email.</p>\n</body>\n</html>`;\n\nreturn {\n  json: {\n    html: html\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        880
+      ],
+      "id": "4db5336b-56e3-4f5e-b561-d121ee2fe020",
+      "name": "Format Success Page"
+    },
+    {
+      "parameters": {
+        "jsCode": "const caseId = $('Parse Feedback').first().json.case_id;\n\nconst html = `<!DOCTYPE html>\n<html>\n<head>\n  <title>Thank You!</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }\n    .success { color: #059669; font-size: 48px; }\n  </style>\n</head>\n<body>\n  <div class=\"success\">🎉</div>\n  <h1>Thank you for your feedback!</h1>\n  <p>We're glad we could help resolve your issue.</p>\n  <p>Your case #${caseId} has been marked as resolved.</p>\n</body>\n</html>`;\n\nreturn {\n  json: {\n    html: html\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        1296
+      ],
+      "id": "3f2f699a-0385-436c-a97c-40496cc8ad33",
+      "name": "Format Feedback Resolved"
+    },
+    {
+      "parameters": {
+        "jsCode": "const caseId = $('Parse Feedback').first().json.case_id;\n\nconst html = `<!DOCTYPE html>\n<html>\n<head>\n  <title>We're Here to Help</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }\n    .info { color: #2563eb; font-size: 48px; }\n  </style>\n</head>\n<body>\n  <div class=\"info\">🤝</div>\n  <h1>We'll get you more help!</h1>\n  <p>Your case #${caseId} has been escalated to our support team.</p>\n  <p>A specialist will review your issue and reach out to you shortly.</p>\n</body>\n</html>`;\n\nreturn {\n  json: {\n    html: html\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        1488
+      ],
+      "id": "61bba3f6-3645-4196-a123-300a3f2ff1b1",
+      "name": "Format Feedback Escalated"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.description || \"Please analyze the customer issue and provide a solution based on the knowledge context provided.\" }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are an expert technical support engineer. Your role is to provide clear, actionable solutions to customer issues.\n\n## Customer Issue:\n{{ $json.description }}\n\n## Issue Classification:\n- Category: {{ $json.classification.category }}\n- Subcategory: {{ $json.classification.subcategory }}\n- Priority: {{ $json.classification.priority }}\n- Complexity: {{ $json.classification.estimated_complexity }}\n\n## Customer Context:\n- Account Tier: {{ $json.customer_context.account_tier }}\n- Total Past Cases: {{ $json.customer_context.total_cases }}\n- Product: {{ $json.product }}\n- Environment: {{ $json.environment }}\n\n## Knowledge Base Context:\n\n### Relevant Error Codes:\n{{ JSON.stringify($json.knowledge_context.error_codes, null, 2) }}\n\n### Similar Resolved Cases:\n{{ JSON.stringify($json.knowledge_context.similar_cases, null, 2) }}\n\n### Automated Fix Available: {{ $json.knowledge_context.has_automated_fix }}\n\n## Available Tools:\nYou have access to a Knowledge Base Search tool. Use it to find relevant articles, documentation, and solutions related to the customer's issue. Search for specific error codes, product features, or problem descriptions to get the most relevant information.\n\n## Your Task:\nProvide a comprehensive solution that includes:\n1. Step-by-step resolution instructions (clear, numbered)\n2. Diagnostic commands to verify the issue\n3. Expected outcomes after each step\n4. Links to relevant documentation (use the Knowledge Base Search tool to find these)\n5. Estimated time to resolution\n\n## Guidelines:\n- Use the Knowledge Base Search tool to find relevant articles before providing your solution\n- Always start with the simplest solution first\n- Include verification steps after each major action\n- Be explicit about any risks or reversible actions\n- Use customer-friendly language, avoid jargon\n- If automated fix is available, recommend it but note approval requirement\n- If unsure, set confidence lower and recommend human review\n\n## Important:\n- Set requires_approval = true if solution involves data changes, restarts, or automated fixes\n- Set automated_fix_available = true only if knowledge context confirms it\n- Reference specific KB articles or error codes in your solution"
+        }
+      },
+      "id": "cf4c0fc3-b607-4f3e-8a09-5a00020caaf9",
+      "name": "Solution Generator Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        624,
+        240
+      ]
+    }
+  ],
+  "pinData": {
+    "Webhook - Self-Service": [
+      {
+        "json": {
+          "case_id": "a1b2c3d4-0018-4000-8000-000000000018",
+          "customer_id": "c1234567-0001-4000-8000-000000000001",
+          "customer_context": {
+            "name": "Test User",
+            "email": "shawnbrianray@gmail.com",
+            "company": "Test Company",
+            "tier": "professional"
+          },
+          "issue": {
+            "category": "billing",
+            "subcategory": "invoice",
+            "description": "I have a question about a charge on my latest invoice.",
+            "error_code": null
+          },
+          "triage": {
+            "priority": "medium",
+            "complexity": "simple",
+            "sentiment": "confused",
+            "confidence": 0.9,
+            "routing": "self-service"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook - Self-Service": {
+      "main": [
+        [
+          {
+            "node": "Extract Case Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Case Data": {
+      "main": [
+        [
+          {
+            "node": "Search Knowledge Base",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Find Similar Resolved Cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Similar Resolved Cases": {
+      "main": [
+        [
+          {
+            "node": "Merge Search",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "KB Vector Search",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Knowledge Sources": {
+      "main": [
+        [
+          {
+            "node": "Solution Generator Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solution Generator Agent": {
+      "main": [
+        [
+          {
+            "node": "Combine Solution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solution Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Solution Generator Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Solution": {
+      "main": [
+        [
+          {
+            "node": "Requires Approval?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requires Approval?": {
+      "main": [
+        [
+          {
+            "node": "Update Awaiting Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update In Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Awaiting Approval": {
+      "main": [
+        [
+          {
+            "node": "Format For Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format For Approval": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Email": {
+      "main": [
+        [
+          {
+            "node": "Respond - Approval Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update In Progress": {
+      "main": [
+        [
+          {
+            "node": "Format Direct Solution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Direct Solution": {
+      "main": [
+        [
+          {
+            "node": "Send Solution Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Solution Email": {
+      "main": [
+        [
+          {
+            "node": "Log Solution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Solution": {
+      "main": [
+        [
+          {
+            "node": "Respond - Solution Delivered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Approval": {
+      "main": [
+        [
+          {
+            "node": "Parse Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Approval": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pending Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pending Case": {
+      "main": [
+        [
+          {
+            "node": "Valid Case?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Case?": {
+      "main": [
+        [
+          {
+            "node": "Mark Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Invalid Approval Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Approved": {
+      "main": [
+        [
+          {
+            "node": "Execute Automated Fix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Automated Fix": {
+      "main": [
+        [
+          {
+            "node": "Mark Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Resolved": {
+      "main": [
+        [
+          {
+            "node": "Format Success Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Feedback": {
+      "main": [
+        [
+          {
+            "node": "Parse Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Feedback": {
+      "main": [
+        [
+          {
+            "node": "Issue Resolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Resolved?": {
+      "main": [
+        [
+          {
+            "node": "Mark Resolved (Feedback)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate to Collaborative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Resolved (Feedback)": {
+      "main": [
+        [
+          {
+            "node": "Format Feedback Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate to Collaborative": {
+      "main": [
+        [
+          {
+            "node": "Format Feedback Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Solution Generator Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KB Vector Search": {
+      "ai_tool": [
+        [
+          {
+            "node": "Solution Generator Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Merge Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Search": {
+      "main": [
+        [
+          {
+            "node": "Merge Knowledge Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Success Page": {
+      "main": [
+        [
+          {
+            "node": "Approval Success Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Feedback Resolved": {
+      "main": [
+        [
+          {
+            "node": "Feedback - Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Feedback Escalated": {
+      "main": [
+        [
+          {
+            "node": "Feedback - Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "fba9d061-ec7f-47b2-a4b3-4b08f8fc14b3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b01e799c8597a418342586f9fe42b57cf7798483b7d7540aea0ab43464ea70a2"
+  },
+  "id": "oMdEKyeL73U75Z_w0DnwG",
+  "tags": [
+    {
+      "updatedAt": "2026-01-17T08:36:28.435Z",
+      "createdAt": "2026-01-17T08:36:28.435Z",
+      "id": "3w9wge9Ehnuhs1t9",
+      "name": "self-service"
+    },
+    {
+      "updatedAt": "2026-01-17T08:36:28.407Z",
+      "createdAt": "2026-01-17T08:36:28.407Z",
+      "id": "OtUeceTAP0XdAwUt",
+      "name": "support"
+    },
+    {
+      "updatedAt": "2026-01-17T08:36:28.473Z",
+      "createdAt": "2026-01-17T08:36:28.473Z",
+      "id": "pzo2auluhBTLQ8wB",
+      "name": "resolution"
+    }
+  ]
+}

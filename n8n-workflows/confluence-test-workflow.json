@@ -1,0 +1,65 @@
+{
+  "name": "Confluence API Test",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start-node",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://shawnbrianray-1765049461409.atlassian.net/wiki/api/v2/pages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"spaceId\": \"PM\",\n  \"parentId\": \"1765049461409\",\n  \"title\": \"Test Enhancement - {{ $now.toISO() }}\",\n  \"status\": \"current\",\n  \"body\": {\n    \"representation\": \"storage\",\n    \"value\": \"<h2>Test Page</h2><p>This is a test page created via n8n API.</p><p><strong>Created:</strong> {{ $now.toISO() }}</p>\"\n  }\n}",
+        "options": {}
+      },
+      "id": "confluence-http-node",
+      "name": "Create Confluence Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CREATE_NEW",
+          "name": "Atlassian API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Create Confluence Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

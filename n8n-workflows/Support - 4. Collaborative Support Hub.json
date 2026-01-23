@@ -1,0 +1,1234 @@
+{
+  "name": "Support - 4. Collaborative Support Hub",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support/collaborative",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "c4b9a443-8a77-49d3-a3fc-52df99bdd567",
+      "name": "Webhook - Collaborative",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2208,
+        848
+      ],
+      "webhookId": "support-collaborative-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract case data from incoming request\nconst input = $input.item.json;\nconst caseData = input.body || input;\n\nreturn {\n  json: {\n    case_id: caseData.case_id,\n    request_id: caseData.request_id,\n    description: caseData.description,\n    classification: caseData.classification,\n    customer_context: caseData.customer_context,\n    product: caseData.product,\n    product_version: caseData.product_version,\n    environment: caseData.environment,\n    channel: caseData.channel,\n    escalation_reason: caseData.escalation_reason,\n    collaborative_started_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "ee9f8c9f-e5c2-4fb0-8b5c-9ccd21d1fb7d",
+      "name": "Extract Case Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  ci.interaction_id,\n  ci.actor_type,\n  ci.message,\n  ci.interaction_type,\n  ci.created_at\nFROM case_interactions ci\nWHERE ci.case_id = '{{ $json.case_id }}'\nORDER BY ci.created_at DESC\nLIMIT 20;",
+        "options": {}
+      },
+      "id": "acba98c5-707e-4d50-8278-943957d2fd82",
+      "name": "Fetch Case History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1760,
+        752
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "5488614c-575b-4ad2-9b5b-ac5844e27b4e",
+      "name": "Embeddings OpenAI",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        1072
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "x6T6BlWTbq0xsdSm",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge all research sources\nconst caseData = $('Extract Case Data').first().json;\n\n// Get all items from the merge - separate case history from jira results\nconst allItems = $input.all().map(item => item.json);\n\n// Case history items have interaction_id\nconst caseHistory = allItems.filter(item => item.interaction_id);\n\n// Jira results come as an array in the 'issues' property\nconst jiraItem = allItems.find(item => item.issues !== undefined);\nconst jiraIssues = (jiraItem?.issues || []).map(issue => ({\n  key: issue.key,\n  summary: issue.fields?.summary,\n  status: issue.fields?.status?.name,\n  priority: issue.fields?.priority?.name,\n  url: `https://shawnbrianray-1765049461409.atlassian.net/browse/${issue.key}`,\n  created: issue.fields?.created\n}));\n\nreturn {\n  json: {\n    ...caseData,\n    research_context: {\n      case_history: caseHistory,\n      jira_issues: jiraIssues,\n      kb_documents: []\n    }\n  }\n};\n"
+      },
+      "id": "c5c8d2ba-d965-4ee8-a6b4-0919dc533d98",
+      "name": "Merge Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1312,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-20250514",
+        "options": {
+          "maxTokensToSample": 4096,
+          "temperature": 0.4
+        }
+      },
+      "id": "91bbccdd-b0ac-456d-ab78-808639a941af",
+      "name": "Claude Sonnet - Research",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [
+        -1088,
+        864
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "eJiT1B0Q8DpkD2EP",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"solution_draft\": {\n      \"type\": \"string\",\n      \"description\": \"Comprehensive draft solution with step-by-step instructions\"\n    },\n    \"diagnostic_steps\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" },\n      \"description\": \"Steps to diagnose the issue further if needed\"\n    },\n    \"confidence\": {\n      \"type\": \"number\",\n      \"minimum\": 0,\n      \"maximum\": 1,\n      \"description\": \"Confidence in the solution (0-1)\"\n    },\n    \"citations\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"type\": { \"type\": \"string\" },\n          \"source\": { \"type\": \"string\" },\n          \"relevance\": { \"type\": \"string\" }\n        }\n      },\n      \"description\": \"Sources cited in the solution\"\n    },\n    \"workarounds\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" },\n      \"description\": \"Alternative workarounds if primary solution doesn't work\"\n    },\n    \"escalation_recommendation\": {\n      \"type\": \"string\",\n      \"enum\": [\"none\", \"engineering\", \"product\", \"security\"],\n      \"description\": \"Whether this should be escalated further and to whom\"\n    },\n    \"review_notes\": {\n      \"type\": \"string\",\n      \"description\": \"Notes for the human reviewer about uncertainties or areas to verify\"\n    },\n    \"estimated_resolution_time\": {\n      \"type\": \"number\",\n      \"description\": \"Estimated time in minutes for customer to resolve\"\n    }\n  },\n  \"required\": [\"solution_draft\", \"confidence\", \"citations\", \"escalation_recommendation\", \"review_notes\"]\n}"
+      },
+      "id": "5960ec35-a323-4503-b10b-9bb15c3cf176",
+      "name": "Research Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        -672,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine case data with AI research\nconst caseData = $('Merge Research').first().json;\nconst aiResearch = $input.item.json.output || $input.item.json;\n\nreturn {\n  json: {\n    ...caseData,\n    ai_draft: {\n      solution: aiResearch.solution_draft,\n      diagnostic_steps: aiResearch.diagnostic_steps || [],\n      confidence: aiResearch.confidence,\n      citations: aiResearch.citations || [],\n      workarounds: aiResearch.workarounds || [],\n      escalation_recommendation: aiResearch.escalation_recommendation,\n      review_notes: aiResearch.review_notes,\n      estimated_resolution_time: aiResearch.estimated_resolution_time || 30\n    },\n    draft_created_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "43fbe5e1-6544-48d5-8139-ea9b1c792277",
+      "name": "Combine Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO review_queue (\n  case_id,\n  ai_solution,\n  ai_confidence,\n  status,\n  metadata\n) VALUES (\n  '{{ $json.case_id }}',\n  {{ $json.sql_solution }},\n  {{ $json.confidence_value }},\n  'pending',\n  {{ $json.sql_metadata }}::jsonb\n) RETURNING review_id;\n",
+        "options": {}
+      },
+      "id": "78668f66-ef56-4b00-bec0-c47cde8fda25",
+      "name": "Insert Review Queue",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -16,
+        848
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Add review_id to the data\nconst caseData = $('Combine Draft').first().json;\nconst reviewId = $input.item.json.review_id;\n\nreturn {\n  json: {\n    ...caseData,\n    review_id: reviewId\n  }\n};"
+      },
+      "id": "0b95a01e-b8ec-4540-9838-f607334adf5f",
+      "name": "Add Review ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-escalations",
+          "mode": "name"
+        },
+        "text": "=={{ $json.slack_message }} ",
+        "otherOptions": {}
+      },
+      "id": "a33754b0-b9d7-41f3-96c8-36426006f2a5",
+      "name": "Post to Slack Review",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        656,
+        848
+      ],
+      "webhookId": "3d9accc9-4284-4678-9ece-71f591669bad",
+      "credentials": {
+        "slackApi": {
+          "id": "viv5vjBrnt9hNw4r",
+          "name": "Slack API - CX Catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'pending_review',\n    metadata = metadata || '{{ JSON.stringify({ review_id: $(\"Add Review ID\").first().json.review_id, review_started_at: new Date().toISOString() }) }}'::jsonb\nWHERE case_id = '{{ $(\"Add Review ID\").first().json.case_id }}';\n",
+        "options": {}
+      },
+      "id": "e144bed0-e422-4413-a259-942f3d16f469",
+      "name": "Update Case Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        848
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  case_id: $json.case_id,\n  review_id: $json.review_id,\n  status: 'pending_review',\n  message: 'Case submitted for human review',\n  ai_confidence: $json.ai_draft.confidence,\n  estimated_review_time: '2 hours'\n}, null, 2) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e28a4d23-d550-4889-a2c3-24be2dd382d7",
+      "name": "Respond - Submitted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1104,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "=GET",
+        "path": "support/review/:reviewId/:action",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c549dfd7-c5f4-4c5b-a78e-9bf11da00ed2",
+      "name": "Webhook - Review Action",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2208,
+        1584
+      ],
+      "webhookId": "support-review-action-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse review action from URL\nconst reviewId = $input.item.json.params?.reviewId;\nconst action = $input.item.json.params?.action;\nconst editedSolution = $input.item.json.query?.solution || $input.item.json.body?.solution;\nconst reviewerComments = $input.item.json.query?.comments || $input.item.json.body?.comments;\n\nreturn {\n  json: {\n    review_id: reviewId,\n    action: action, // 'approve', 'reject', 'edit'\n    edited_solution: editedSolution,\n    reviewer_comments: reviewerComments,\n    action_received_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "6d777a5c-5119-4a77-b8bc-327174815f19",
+      "name": "Parse Review Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        1584
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  rq.*,\n  c.case_id,\n  c.customer_id,\n  c.description,\n  c.channel,\n  cust.email as customer_email,\n  cust.name as customer_name\nFROM review_queue rq\nJOIN cases c ON rq.case_id = c.case_id\nJOIN customers cust ON c.customer_id = cust.customer_id\nWHERE rq.review_id = '{{ $json.review_id }}'\n  AND rq.status = 'pending';",
+        "options": {}
+      },
+      "id": "91103512-5f66-45db-83aa-fbbc454c3411",
+      "name": "Fetch Review Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1760,
+        1584
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-valid",
+              "leftValue": "={{ $json.review_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8a18fd8f-2763-4fae-ab05-de4917cc474b",
+      "name": "Valid Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1536,
+        1584
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse Review Action').first().json.action }}",
+                    "rightValue": "approve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse Review Action').first().json.action }}",
+                    "rightValue": "edit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "461f2bbc-f647-43a8-ad76-a4573b2a2008",
+      "name": "Route by Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1312,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE review_queue \nSET status = 'approved',\n    reviewed_at = NOW(),\n    final_solution = ai_solution\nWHERE review_id = '{{ $json.review_id }}';",
+        "options": {}
+      },
+      "id": "9a4119a1-7937-4062-bdc0-134d0ffae6ee",
+      "name": "Mark Approved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -864,
+        1280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE review_queue \nSET status = 'edited',\n    reviewed_at = NOW(),\n    final_solution = '{{ $('Parse Review Action').first().json.edited_solution.replace(/'/g, \"''\") }}',\n    reviewer_comments = '{{ ($('Parse Review Action').first().json.reviewer_comments || '').replace(/'/g, \"''\") }}'\nWHERE review_id = '{{ $json.review_id }}';",
+        "options": {}
+      },
+      "id": "9509410f-d47d-4164-a565-819503744ae5",
+      "name": "Mark Edited",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1088,
+        1472
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO agent_feedback (\n  case_id,\n  agent_name,\n  agent_output,\n  human_correction,\n  feedback_type\n) VALUES (\n  '{{ $json.case_id }}',\n  'collaborative-research-agent',\n  '{{ $json.ai_solution.replace(/'/g, \"''\") }}',\n  '{{ $('Parse Review Action').first().json.edited_solution.replace(/'/g, \"''\") }}',\n  'correction'\n);",
+        "options": {}
+      },
+      "id": "9ce96714-884c-4766-91c1-3db9cba18ab9",
+      "name": "Log Edit Feedback",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -864,
+        1472
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE review_queue \nSET status = 'rejected',\n    reviewed_at = NOW(),\n    reviewer_comments = '{{ ($('Parse Review Action').first().json.reviewer_comments || 'Rejected by reviewer').replace(/'/g, \"''\") }}'\nWHERE review_id = '{{ $json.review_id }}';",
+        "options": {}
+      },
+      "id": "a3dc9d05-f09e-492b-8c97-c14fb7e85e23",
+      "name": "Mark Rejected",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1088,
+        1664
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare final solution for sending to customer\nconst reviewData = $('Fetch Review Data').first().json;\nconst actionData = $('Parse Review Action').first().json;\n\n// Determine which solution to use\nlet finalSolution = reviewData.ai_solution;\nif (actionData.action === 'edit' && actionData.edited_solution) {\n  finalSolution = actionData.edited_solution;\n}\n\nreturn {\n  json: {\n    review_id: reviewData.review_id,\n    case_id: reviewData.case_id,\n    customer_email: reviewData.customer_email,\n    customer_name: reviewData.customer_name,\n    final_solution: finalSolution,\n    action: actionData.action\n  }\n};\n"
+      },
+      "id": "337cdbd3-119a-4ab6-a4e0-46b51e62967d",
+      "name": "Prepare Final Solution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customer_email }}",
+        "subject": "={{ $json.email_subject }}",
+        "message": "={{ $json.email_html }}",
+        "options": {}
+      },
+      "id": "421f2dfb-81de-4033-ad66-ee8dea6821f6",
+      "name": "Send Solution to Customer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -192,
+        1296
+      ],
+      "webhookId": "17094a11-c482-4a34-bc67-7370cce1b3ca",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "FD4ccXskpie7ZLhN",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'solution_delivered',\n    metadata = metadata || '{{ JSON.stringify({ solution_delivered_at: new Date().toISOString(), review_action: $(\"Prepare Final Solution\").first().json.action }) }}'::jsonb\nWHERE case_id = '{{ $(\"Prepare Final Solution\").first().json.case_id }}';\n",
+        "options": {}
+      },
+      "id": "60e54372-5585-45ba-8e4a-533cc90361d8",
+      "name": "Update Case - Delivered",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        32,
+        1296
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Review Processed</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }\n    .success { color: #059669; font-size: 48px; }\n  </style>\n</head>\n<body>\n  <div class=\"success\">✅</div>\n  <h1>Review Processed</h1>\n  <p>The solution has been sent to the customer.</p>\n  <p>Case #{{ $json.case_id }}</p>\n  <p>Action: {{ $json.action }}</p>\n</body>\n</html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "3633b7da-324f-4197-b735-e9bcd918b696",
+      "name": "Review Processed Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        256,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE cases \nSET status = 'escalated_senior',\n    escalated = true,\n    metadata = metadata || '{{ JSON.stringify({ escalated_at: new Date().toISOString(), escalation_reason: \"review_rejected\" }) }}'::jsonb\nWHERE case_id = '{{ $(\"Fetch Review Data\").first().json.case_id }}';\n",
+        "options": {}
+      },
+      "id": "ee2b66d3-6909-4a84-9ebd-9d163bf3ae73",
+      "name": "Escalate to Senior",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -864,
+        1664
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support-escalations",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_message }}",
+        "otherOptions": {}
+      },
+      "id": "bb67c67f-fde3-4a5a-ae05-187ac3c95a32",
+      "name": "Slack - Escalation",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        -416,
+        1664
+      ],
+      "webhookId": "1d9ec746-29f5-4e6a-bc3d-d10698d2ae92",
+      "credentials": {
+        "slackApi": {
+          "id": "viv5vjBrnt9hNw4r",
+          "name": "Slack API - CX Catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Escalated</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }\n    .warning { color: #d97706; font-size: 48px; }\n  </style>\n</head>\n<body>\n  <div class=\"warning\">⚠️</div>\n  <h1>Case Escalated</h1>\n  <p>This case has been escalated to a senior engineer for review.</p>\n  <p>Case #{{ $json.case_id }}</p>\n</body>\n</html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "409f1180-8323-47b4-bedb-ad22f5462ca5",
+      "name": "Escalated Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -192,
+        1664
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Invalid Review</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }\n    .error { color: #dc2626; font-size: 48px; }\n  </style>\n</head>\n<body>\n  <div class=\"error\">❌</div>\n  <h1>Invalid or Expired Review</h1>\n  <p>This review link is no longer valid or has already been processed.</p>\n</body>\n</html>",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "id": "897920d5-5ea3-49ae-ab23-52f32e3613c7",
+      "name": "Invalid Review Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -1312,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Workflow 4: Collaborative Support Hub\n\n**Purpose:** Handle medium-confidence cases requiring human expertise, with AI assistance to accelerate resolution.\n\n### Flow:\n1. Receive case from Triage (medium confidence)\n2. Gather extended context:\n   - Case interaction history\n   - GitHub issues search\n   - KB/Documentation search\n3. AI Research Agent drafts solution\n4. Insert into review queue\n5. Post to Slack for human review\n6. Human reviews via webhook:\n   - Approve → Send to customer\n   - Edit → Save feedback, send edited version\n   - Reject → Escalate to senior engineer\n\n### Webhook Endpoints:\n- `/support/collaborative` - Main entry\n- `/support/review/:reviewId/:action` - Review actions\n\n### Configuration Required:\n- PostgreSQL credentials\n- Supabase credentials\n- Anthropic (Claude) credentials\n- OpenAI credentials (embeddings)\n- Slack credentials\n- Gmail credentials\n- GITHUB_TOKEN env variable\n- GITHUB_REPO env variable",
+        "height": 904,
+        "width": 360
+      },
+      "id": "65089ee6-e2b2-47f0-bafd-2d7eb926b4cc",
+      "name": "Workflow Info",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2688,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "options": {
+          "jql": "=project = DEV AND (summary ~ \"{{ $json.classification.category }}\" OR summary ~ \"{{ $json.classification.subcategory }}\" OR description ~ \"{{ $json.classification.category }}\") ORDER BY created DESC"
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        -1760,
+        944
+      ],
+      "id": "c9bdbe87-5824-456e-a015-0c6750de9cf7",
+      "name": "Search Jira Issues",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "esdOjucGFFmZQRup",
+          "name": "Jira SW Cloud account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1536,
+        848
+      ],
+      "id": "fc87b4dc-3958-4508-82f5-f7de6cdae6ea",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare data for SQL insertion with proper escaping\nconst data = $input.first().json;\n\n// Function to safely escape for PostgreSQL - using double-dollar quoting with unique tag\nfunction pgEscape(value) {\n  if (value === null || value === undefined) return 'NULL';\n  const str = String(value);\n  // Use a tag unlikely to appear in content\n  const tag = '$CXCAT$';\n  // If the tag appears in content, use alternate\n  if (str.includes(tag)) {\n    return \"'\" + str.replace(/'/g, \"''\") + \"'\";\n  }\n  return tag + str + tag;\n}\n\n// Prepare the solution text\nconst solutionEscaped = pgEscape(data.ai_draft.solution);\n\n// Prepare metadata as JSON\nconst metadata = {\n  citations: data.ai_draft.citations || [],\n  review_notes: data.ai_draft.review_notes || '',\n  escalation_recommendation: data.ai_draft.escalation_recommendation || 'none'\n};\nconst metadataEscaped = pgEscape(JSON.stringify(metadata));\n\nreturn {\n  json: {\n    ...data,\n    sql_solution: solutionEscaped,\n    sql_metadata: metadataEscaped,\n    confidence_value: data.ai_draft.confidence || 0.5\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        848
+      ],
+      "id": "d1ed47c2-6d89-47c8-916c-891114efe04e",
+      "name": "Prepare data for SQL insertion"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=**Customer Issue:**\n{{ $json.description }}\n\n**Classification:**\n- Category: {{ $json.classification.category }}\n- Subcategory: {{ $json.classification.subcategory }}\n- Priority: {{ $json.classification.priority }}\n- Sentiment: {{ $json.classification.sentiment }}\n\n**Customer Context:**\n- Name: {{ $json.customer_context.name }}\n- Account Tier: {{ $json.customer_context.account_tier }}\n- Product: {{ $json.product }} ({{ $json.product_version }})\n- Environment: {{ $json.environment }}\n- Channel: {{ $json.channel }}\n\n**Case History:**\n{{ $json.research_context.case_history.length > 0 ? $json.research_context.case_history.map(h => `- [${h.created_at}] ${h.actor_type}: ${h.message}`).join('\\n') : 'No previous interactions' }}\n\n**Related Jira Issues:**\n{{ $json.research_context.jira_issues.length > 0 ? $json.research_context.jira_issues.map(j => `- ${j.key}: ${j.summary} (${j.status}) - ${j.url}`).join('\\n') : 'No related Jira issues found' }}\n\n**Escalation Reason (if any):**\n{{ $json.escalation_reason || 'N/A' }}\n\nPlease draft a comprehensive solution for this customer issue.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a senior technical support engineer researching a customer issue. Your role is to draft a comprehensive solution that a human reviewer can approve, edit, or enhance.\n\nAnalyze all available information, draft a comprehensive solution, cite all sources used, note any uncertainties for the human reviewer, and recommend escalation if needed.\n\nBe thorough but clear - this will be reviewed by a human. Include diagnostic steps to verify the solution. Provide workarounds when possible. Note confidence level and areas of uncertainty. Cite specific documentation or Jira issues. Flag anything that needs engineering review.\n\nYour review notes should include areas where you're uncertain, alternative approaches worth considering, specific points the reviewer should verify, and any risks or caveats."
+        }
+      },
+      "id": "f74ab3eb-efc4-4272-b13d-429ab8524dc0",
+      "name": "Research Agent1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -960,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Search the knowledge base for relevant articles and documentation about the customer issue",
+        "tableName": {
+          "__rl": true,
+          "mode": "id",
+          "value": "kb_articles"
+        },
+        "topK": 5,
+        "options": {}
+      },
+      "id": "be02c831-30f3-4ac1-9d79-20198aed1ebd",
+      "name": "Search KB & Docs1",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        -960,
+        864
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "GvQNJg6kNbK05pPw",
+          "name": "n8n-supabase-api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst slackMessage = `:memo: *Human Review Required*\n\n*Case ID:* ${data.case_id}\n*Review ID:* ${data.review_id}\n*Customer:* ${data.customer_context?.name || 'Unknown'} (${data.customer_context?.account_tier || 'standard'})\n*Priority:* ${data.classification?.priority || 'medium'} ${data.classification?.priority === 'high' ? ':large_orange_circle:' : ':large_yellow_circle:'}\n*Category:* ${data.classification?.category || 'general'} / ${data.classification?.subcategory || 'other'}\n\n---\n\n*Customer Issue:*\n${(data.description || '').substring(0, 500)}${(data.description || '').length > 500 ? '...' : ''}\n\n---\n\n*AI Draft Solution:*\n${(data.ai_draft?.solution || '').substring(0, 800)}${(data.ai_draft?.solution || '').length > 800 ? '...' : ''}\n\n---\n\n*AI Confidence:* ${Math.round((data.ai_draft?.confidence || 0) * 100)}%\n*Escalation Recommendation:* ${data.ai_draft?.escalation_recommendation || 'none'}\n\n*Review Notes from AI:*\n${data.ai_draft?.review_notes || 'No notes'}\n\n---\n\n*Actions:*\n:white_check_mark: <https://sbray205.app.n8n.cloud/webhook/support-review-action-webhook/support/review/${data.review_id}/approve|Approve>\n:x: <https://sbray205.app.n8n.cloud/webhook/support-review-action-webhook/support/review/${data.review_id}/reject|Reject>\n\n_Please review within 2 hours._`;\n\nreturn {\n  json: {\n    ...data,\n    slack_message: slackMessage\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        848
+      ],
+      "id": "75559e44-c271-49a5-a6f6-662e192e7e8f",
+      "name": "Build Review Message"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst htmlEmail = `\n<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n  <p>Dear ${data.customer_name},</p>\n  \n  <p>Thank you for your patience. Our support team has reviewed your case and prepared a solution.</p>\n  \n  <hr style=\"border: 1px solid #eee; margin: 20px 0;\">\n  \n  <div style=\"background-color: #f9f9f9; padding: 15px; border-radius: 5px;\">\n    ${(data.final_solution || '').replace(/\\n/g, '<br>')}\n  </div>\n  \n  <hr style=\"border: 1px solid #eee; margin: 20px 0;\">\n  \n  <p><strong>Case Details:</strong></p>\n  <ul>\n    <li>Case ID: ${data.case_id}</li>\n  </ul>\n  \n  <p><strong>Did this help?</strong></p>\n  <p>Please reply to this email to let us know if the solution resolved your issue, or if you need further assistance.</p>\n  \n  <p>Best regards,<br>Support Team</p>\n</div>\n`;\n\nreturn {\n  json: {\n    ...data,\n    email_html: htmlEmail,\n    email_subject: `Support Case #${data.case_id}: Solution from Our Team`\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -416,
+        1296
+      ],
+      "id": "66d5daac-01f3-4d8a-bafb-eee384c345ca",
+      "name": "Format Email for Customer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const reviewData = $('Fetch Review Data').first().json;\nconst actionData = $('Parse Review Action').first().json;\n\nconst slackMessage = `:rotating_light: *Senior Engineer Review Needed*\n\n*Case ID:* ${reviewData.case_id}\n*Review ID:* ${reviewData.review_id}\n*Customer:* ${reviewData.customer_name} (${reviewData.customer_email})\n\nThe AI-drafted solution was rejected by the reviewer.\n\n*Reviewer Comments:*\n${actionData.reviewer_comments || 'No comments provided'}\n\n*Original Issue:*\n${(reviewData.description || '').substring(0, 500)}${(reviewData.description || '').length > 500 ? '...' : ''}\n\n*AI Solution that was rejected:*\n${(reviewData.ai_solution || '').substring(0, 500)}${(reviewData.ai_solution || '').length > 500 ? '...' : ''}\n\nPlease assign a senior engineer to investigate this case.`;\n\nreturn {\n  json: {\n    ...reviewData,\n    slack_message: slackMessage\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        1664
+      ],
+      "id": "2f81d41a-3c26-4b7a-881a-4f1d674f4335",
+      "name": "Build Escalation Message"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Collaborative": {
+      "main": [
+        [
+          {
+            "node": "Extract Case Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Case Data": {
+      "main": [
+        [
+          {
+            "node": "Fetch Case History",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Jira Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Case History": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Search KB & Docs1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Research": {
+      "main": [
+        [
+          {
+            "node": "Research Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet - Research": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Research Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Research Agent1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Draft": {
+      "main": [
+        [
+          {
+            "node": "Prepare data for SQL insertion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Review Queue": {
+      "main": [
+        [
+          {
+            "node": "Add Review ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Review ID": {
+      "main": [
+        [
+          {
+            "node": "Build Review Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Slack Review": {
+      "main": [
+        [
+          {
+            "node": "Update Case Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Case Status": {
+      "main": [
+        [
+          {
+            "node": "Respond - Submitted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Review Action": {
+      "main": [
+        [
+          {
+            "node": "Parse Review Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Review Action": {
+      "main": [
+        [
+          {
+            "node": "Fetch Review Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Review Data": {
+      "main": [
+        [
+          {
+            "node": "Valid Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Review?": {
+      "main": [
+        [
+          {
+            "node": "Route by Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Invalid Review Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Action": {
+      "main": [
+        [
+          {
+            "node": "Mark Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Edited",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Approved": {
+      "main": [
+        [
+          {
+            "node": "Prepare Final Solution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Edited": {
+      "main": [
+        [
+          {
+            "node": "Log Edit Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Edit Feedback": {
+      "main": [
+        [
+          {
+            "node": "Prepare Final Solution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Final Solution": {
+      "main": [
+        [
+          {
+            "node": "Format Email for Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Solution to Customer": {
+      "main": [
+        [
+          {
+            "node": "Update Case - Delivered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Case - Delivered": {
+      "main": [
+        [
+          {
+            "node": "Review Processed Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Rejected": {
+      "main": [
+        [
+          {
+            "node": "Escalate to Senior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate to Senior": {
+      "main": [
+        [
+          {
+            "node": "Build Escalation Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Escalation": {
+      "main": [
+        [
+          {
+            "node": "Escalated Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Jira Issues": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Merge Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare data for SQL insertion": {
+      "main": [
+        [
+          {
+            "node": "Insert Review Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Agent1": {
+      "main": [
+        [
+          {
+            "node": "Combine Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search KB & Docs1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Research Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Review Message": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Email for Customer": {
+      "main": [
+        [
+          {
+            "node": "Send Solution to Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Escalation Message": {
+      "main": [
+        [
+          {
+            "node": "Slack - Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "19975b22-44bc-410b-9291-b43ca6d072e8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b01e799c8597a418342586f9fe42b57cf7798483b7d7540aea0ab43464ea70a2"
+  },
+  "id": "AfkFKXvL2iMxtlmulGCqt",
+  "tags": [
+    {
+      "updatedAt": "2026-01-17T08:36:28.407Z",
+      "createdAt": "2026-01-17T08:36:28.407Z",
+      "id": "OtUeceTAP0XdAwUt",
+      "name": "support"
+    },
+    {
+      "updatedAt": "2026-01-17T08:41:08.109Z",
+      "createdAt": "2026-01-17T08:41:08.109Z",
+      "id": "VRVyEu32J2wTWqKY",
+      "name": "human-in-loop"
+    },
+    {
+      "updatedAt": "2026-01-17T08:41:08.157Z",
+      "createdAt": "2026-01-17T08:41:08.157Z",
+      "id": "rTw0iM5CInbjIgGG",
+      "name": "collaborative"
+    }
+  ]
+}
