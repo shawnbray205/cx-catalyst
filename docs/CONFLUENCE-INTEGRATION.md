@@ -583,12 +583,12 @@ Classification:
 - Product: {{ $json.product }}
 
 Relevant Knowledge Base Articles:
-{{ $json.confluence_results.map(r => `
-Title: ${r.title}
-URL: ${r.url}
-Similarity: ${r.similarity.toFixed(2)}
-Content: ${r.content.substring(0, 1000)}...
-`).join('\n---\n') }}
+\{\{ $json.confluence_results.map(r => `
+Title: $\{r.title}
+URL: $\{r.url}
+Similarity: $\{r.similarity.toFixed(2)}
+Content: $\{r.content.substring(0, 1000)}...
+`).join('\n---\n') \}\}
 
 Based on the customer's issue and the relevant KB articles above, provide:
 1. A clear, personalized solution
