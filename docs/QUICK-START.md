@@ -9,10 +9,14 @@ Get the AI-powered support system running in under 30 minutes.
 Before starting, ensure you have:
 
 - [ ] n8n instance (Cloud or self-hosted v1.0+)
-- [ ] PostgreSQL database (Supabase recommended)
+- [ ] PostgreSQL 14+ with pgvector extension (Supabase recommended)
 - [ ] API keys: Anthropic (Claude), OpenAI
+- [ ] Supabase project URL and service role key
+- [ ] Confluence Cloud account with API token
 - [ ] Slack workspace with bot permissions
-- [ ] Gmail account for email integration
+- [ ] Gmail account for email integration (optional)
+
+> For full infrastructure requirements and credential details, see the [Admin Guide - Installation Requirements](ADMIN-GUIDE.md#installation-requirements).
 
 ---
 
@@ -178,9 +182,13 @@ With Workflows 1 & 2 active:
 ## Support
 
 - Full documentation: `docs/` folder
-- Design document: `cx-catalyst-workflow.md`
+- [User Guide](USER-GUIDE.md) - For support team members
+- [Admin Guide](ADMIN-GUIDE.md) - System administration
+- [API Reference](API-REFERENCE.md) - Webhook API documentation
+- [Confluence Integration](CONFLUENCE-INTEGRATION.md) - Knowledge base setup
+- [Best Practices](BEST-PRACTICES.md) - KB, workflow, and security optimization
 - Workflow README: `n8n-workflows/README.md`
 
 ---
 
-*Quick Start Guide v1.0 - January 2026*
+*Quick Start Guide v2.0 - January 2026*

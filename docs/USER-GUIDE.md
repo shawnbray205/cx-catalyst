@@ -1,20 +1,21 @@
 # CX-Catalyst - User Guide
 
-A comprehensive guide for support staff and team leads using the AI-powered support system.
+A comprehensive guide for support staff, team leads, and customers using the AI-powered support system.
 
 ---
 
 ## Table of Contents
 
 1. [System Overview](#system-overview)
-2. [Understanding the Workflow](#understanding-the-workflow)
-3. [Working with Cases](#working-with-cases)
-4. [Human Review Process](#human-review-process)
-5. [Knowledge Base](#knowledge-base)
-6. [Slack Integration](#slack-integration)
-7. [Reports and Metrics](#reports-and-metrics)
-8. [Best Practices](#best-practices)
-9. [FAQ](#faq)
+2. [Customer Portal Guide](#customer-portal-guide)
+3. [Understanding the Workflow](#understanding-the-workflow)
+4. [Working with Cases](#working-with-cases)
+5. [Human Review Process](#human-review-process)
+6. [Knowledge Base](#knowledge-base)
+7. [Slack Integration](#slack-integration)
+8. [Reports and Metrics](#reports-and-metrics)
+9. [Best Practices](#best-practices)
+10. [FAQ](#faq)
 
 ---
 
@@ -26,6 +27,7 @@ The CX-Catalyst system uses AI to automate and accelerate support case resolutio
 - **Self-Service Resolution** - Automated solutions for common issues
 - **Human-in-Loop Review** - Your expertise where it matters most
 - **Continuous Learning** - System improves from every interaction
+- **100+ KB Articles** - Enterprise, SMB, and Small Business content across the Confluence knowledge base
 
 ### Your Role
 
@@ -35,6 +37,63 @@ As a support team member, you'll:
 2. Approve, edit, or reject proposed resolutions
 3. Handle escalated complex cases
 4. Contribute feedback that improves the AI
+
+---
+
+## Customer Portal Guide
+
+### Submitting a Support Request
+
+Customers can submit support requests through multiple channels:
+
+1. **Web Portal** - Submit via the support intake webhook endpoint
+2. **Email** - Send to the configured support email address
+3. **Slack** - Post in the designated support channel
+4. **API** - Programmatic submission via REST API
+
+#### Web Portal Submission
+
+To submit a request through the web portal:
+
+1. Navigate to the support portal
+2. Enter your **email address** and **name**
+3. Describe the issue in detail
+4. Select the **severity level** (Low, Medium, High, Critical)
+5. Optionally specify the **product** and **environment**
+6. Click **Submit**
+
+You will receive a response containing:
+- A unique **Case ID** for tracking
+- The AI's initial **classification** (category, priority)
+- An **estimated response time** based on priority
+- A **tracking URL** to monitor status
+
+#### Tracking Your Request
+
+After submission, you can track your request status:
+
+- **New** - Request received, awaiting AI triage
+- **Triaged** - AI has classified and routed your request
+- **In Progress** - Solution is being generated or reviewed
+- **Resolved** - Solution has been delivered
+- **Closed** - Case completed
+
+#### Providing Feedback
+
+After receiving a solution, you can rate the response:
+
+- **Score** (1-5) - How helpful was the solution
+- **Comment** - Optional text feedback
+
+Feedback directly improves the AI system. Your ratings help prioritize knowledge base improvements and refine future responses.
+
+#### Searching the Knowledge Base
+
+Before submitting a request, consider searching the knowledge base:
+
+- The KB contains **100+ articles** covering Enterprise, SMB, and Small Business use cases
+- Articles are organized by category: Authentication, Billing, Configuration, API, Performance, and more
+- The AI uses **semantic search** powered by vector embeddings, so natural language queries work well
 
 ---
 
@@ -208,15 +267,17 @@ Cases have a **2-hour review window**. After timeout:
 
 The knowledge base powers AI solutions through:
 
-- **Vector Search** - Semantic similarity matching
+- **Vector Search** - Semantic similarity matching via OpenAI embeddings (text-embedding-3-small, 1536 dimensions)
 - **Error Codes** - Direct lookup for known issues
 - **Case History** - Similar resolved cases
+- **100+ Articles** - Organized across Enterprise, SMB, and Small Business tiers
 
 ### Finding KB Articles
 
-Articles are stored in:
-- **Supabase** - Vector embeddings for search
-- **Confluence** - Human-readable format
+Articles are stored in a hybrid system:
+- **Supabase** (`confluence_kb` table) - Vector embeddings for semantic search
+- **Confluence** (PKB space) - Human-readable format with labels and categories
+- **Automatic Indexing** - New articles are indexed via the KB Embedding Generator workflow
 
 ### Contributing to the KB
 
@@ -400,4 +461,4 @@ New team members should:
 
 ---
 
-*User Guide v1.0 - January 2026*
+*User Guide v2.0 - January 2026*

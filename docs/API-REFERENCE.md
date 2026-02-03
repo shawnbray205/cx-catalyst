@@ -9,10 +9,11 @@ Complete technical reference for all webhook endpoints and integration points.
 1. [Overview](#overview)
 2. [Authentication](#authentication)
 3. [Webhook Endpoints](#webhook-endpoints)
-4. [Request/Response Formats](#requestresponse-formats)
-5. [Error Handling](#error-handling)
-6. [Rate Limits](#rate-limits)
-7. [Integration Examples](#integration-examples)
+4. [Outgoing Webhooks](#outgoing-webhooks)
+5. [Request/Response Formats](#requestresponse-formats)
+6. [Error Handling](#error-handling)
+7. [Rate Limits](#rate-limits)
+8. [Integration Examples](#integration-examples)
 
 ---
 
@@ -344,6 +345,77 @@ POST /webhook/support/review/rev-abc123/edit
   "message": "Solution approved and being delivered to customer."
 }
 ```
+
+---
+
+## Outgoing Webhooks
+
+CX-Catalyst can send webhook notifications to external systems when key events occur. Configure outgoing webhook URLs in n8n workflow settings or environment variables.
+
+### Event Types
+
+| Event | Trigger | Payload Key Fields |
+|-------|---------|-------------------|
+| `case.created` | New case submitted and triaged | case_id, classification, priority |
+| `case.resolved` | Case resolved (self-service or human) | case_id, resolution_type, resolution_time_minutes |
+| `case.escalated` | Case escalated to human review | case_id, escalation_reason, assigned_channel |
+| `review.completed` | Human review action taken | review_id, case_id, action (approve/edit/reject) |
+| `feedback.received` | Customer feedback submitted | case_id, score, comment |
+| `alert.triggered` | Proactive alert detected | alert_id, severity, description |
+
+### Outgoing Webhook Payload Format
+
+All outgoing webhooks use the following envelope:
+
+```json
+{
+  "event": "case.resolved",
+  "timestamp": "2026-01-15T10:30:00Z",
+  "workflow": "workflow-2-self-service",
+  "data": {
+    "case_id": "550e8400-e29b-41d4-a716-446655440000",
+    "customer_id": "customer-uuid",
+    "resolution_type": "self-service-automated",
+    "resolution_time_minutes": 2,
+    "satisfaction_score": null,
+    "metadata": {}
+  }
+}
+```
+
+### Configuring Outgoing Webhooks
+
+In n8n, outgoing webhooks are configured via HTTP Request nodes at the end of workflow branches. To add a new outgoing webhook destination:
+
+1. Open the relevant workflow in n8n
+2. Add an **HTTP Request** node after the event trigger point
+3. Set **Method** to `POST`
+4. Set **URL** to your receiving endpoint
+5. Configure **Headers** (e.g., `X-Webhook-Secret` for signature verification)
+6. Map the payload fields from upstream nodes
+
+### Webhook Signature Verification
+
+Outgoing webhooks include an `X-Webhook-Signature` header containing an HMAC-SHA256 signature of the payload body. Verify the signature on your receiving end to ensure authenticity:
+
+```javascript
+const crypto = require('crypto');
+
+function verifySignature(payload, signature, secret) {
+    const expected = crypto
+        .createHmac('sha256', secret)
+        .update(JSON.stringify(payload))
+        .digest('hex');
+    return crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expected)
+    );
+}
+```
+
+### Retry Policy
+
+Failed outgoing webhook deliveries are retried up to 3 times with exponential backoff (1s, 5s, 30s). After all retries are exhausted, the failure is logged in the `workflow_executions` table.
 
 ---
 
@@ -787,4 +859,4 @@ app.post('/webhook/callback', (req, res) => {
 
 ---
 
-*API Reference v1.0 - January 2026*
+*API Reference v2.0 - January 2026*

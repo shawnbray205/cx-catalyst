@@ -70,14 +70,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// Combine original request with classification\nconst requestData = $('Merge Request & Context').first().json;\nconst agentOutput = $input.item.json;\nconst classification = agentOutput.output || agentOutput;\n\nreturn {\n  json: {\n    ...requestData,\n    classification: {\n      category: classification.category || 'other',\n      subcategory: classification.subcategory || 'general',\n      priority: classification.priority || 'medium',\n      confidence: classification.confidence || 0.5,\n      estimated_complexity: classification.estimated_complexity || 'moderate',\n      suggested_resolution_path: classification.suggested_resolution_path || 'collaborative',\n      reasoning: classification.reasoning || ''\n      // REMOVED: tags field that was causing issues\n    },\n    triaged_at: new Date().toISOString()\n  }\n};"
+        "jsCode": "// Parse AI Response - Extract JSON from agent output\nconst requestData = $('Merge Request & Context').first().json;\nconst agentOutput = $input.item.json;\n\n// Debug: Log the full agent output structure\nconsole.log('Agent output keys:', Object.keys(agentOutput));\nconsole.log('Full agent output:', JSON.stringify(agentOutput, null, 2));\n\n// Try multiple possible field names that n8n AI Agent might use\nlet outputText = '';\nlet directParsed = null;\n\n// First, check if the agent output itself already contains classification fields\n// (This happens when hasOutputParser was false and AI returned JSON directly)\nif (agentOutput.category || agentOutput.confidence || agentOutput.priority) {\n  console.log('Agent output appears to already be parsed JSON');\n  directParsed = agentOutput;\n}\n\n// Check various possible output field names\nif (typeof agentOutput.output === 'string') {\n  outputText = agentOutput.output;\n} else if (typeof agentOutput.text === 'string') {\n  outputText = agentOutput.text;\n} else if (typeof agentOutput.response === 'string') {\n  outputText = agentOutput.response;\n} else if (typeof agentOutput.content === 'string') {\n  outputText = agentOutput.content;\n} else if (typeof agentOutput.message === 'string') {\n  outputText = agentOutput.message;\n} else if (agentOutput.output && typeof agentOutput.output === 'object') {\n  // Output might be nested object - check if it has classification fields\n  if (agentOutput.output.category || agentOutput.output.confidence) {\n    directParsed = agentOutput.output;\n  } else {\n    outputText = JSON.stringify(agentOutput.output);\n  }\n} else {\n  // Last resort: stringify the entire object\n  outputText = JSON.stringify(agentOutput);\n}\n\nconsole.log('Extracted outputText:', outputText);\n\n// Default classification in case parsing fails\nlet classification = {\n  category: 'other',\n  subcategory: 'general',\n  priority: requestData.severity || 'medium',\n  confidence: 0.5,\n  estimated_complexity: 'moderate',\n  suggested_resolution_path: 'collaborative',\n  reasoning: 'Unable to parse AI response, using defaults'\n};\n\ntry {\n  let parsed;\n  \n  // Use directly parsed if available\n  if (directParsed) {\n    console.log('Using directly parsed JSON from agent output');\n    parsed = directParsed;\n  } else {\n    // Try to extract JSON from the response\n    let jsonStr = outputText;\n    \n    // Remove markdown code blocks if present\n    jsonStr = jsonStr.replace(/```json\\n?/gi, '').replace(/```\\n?/gi, '');\n    \n    // Trim whitespace\n    jsonStr = jsonStr.trim();\n    \n    // Try to find JSON object in the text\n    const jsonMatch = jsonStr.match(/\\{[\\s\\S]*\\}/);\n    if (jsonMatch) {\n      jsonStr = jsonMatch[0];\n    }\n    \n    console.log('JSON string to parse:', jsonStr);\n    \n    // Parse the JSON\n    parsed = JSON.parse(jsonStr);\n  }\n  \n  console.log('Parsed JSON:', JSON.stringify(parsed, null, 2));\n  \n  // Validate and normalize the parsed data\n  classification = {\n    category: parsed.category || 'other',\n    subcategory: parsed.subcategory || 'general',\n    priority: parsed.priority || 'medium',\n    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,\n    estimated_complexity: parsed.estimated_complexity || 'moderate',\n    suggested_resolution_path: parsed.suggested_resolution_path || 'collaborative',\n    reasoning: parsed.reasoning || ''\n  };\n  \n  // Normalize priority values\n  const validPriorities = ['critical', 'high', 'medium', 'low'];\n  if (!validPriorities.includes(classification.priority.toLowerCase())) {\n    classification.priority = 'medium';\n  } else {\n    classification.priority = classification.priority.toLowerCase();\n  }\n  \n  // Normalize complexity values\n  const validComplexities = ['simple', 'moderate', 'complex'];\n  if (!validComplexities.includes(classification.estimated_complexity.toLowerCase())) {\n    classification.estimated_complexity = 'moderate';\n  } else {\n    classification.estimated_complexity = classification.estimated_complexity.toLowerCase();\n  }\n  \n  // Normalize resolution path\n  const validPaths = ['self-service', 'collaborative', 'escalate'];\n  if (!validPaths.includes(classification.suggested_resolution_path.toLowerCase())) {\n    classification.suggested_resolution_path = 'collaborative';\n  } else {\n    classification.suggested_resolution_path = classification.suggested_resolution_path.toLowerCase();\n  }\n  \n  // Ensure confidence is between 0 and 1\n  if (classification.confidence < 0) classification.confidence = 0;\n  if (classification.confidence > 1) classification.confidence = 1;\n  \n  console.log('Final classification:', JSON.stringify(classification, null, 2));\n  \n} catch (error) {\n  console.log('Failed to parse AI response:', error.message);\n  console.log('Raw output:', outputText);\n  // Keep default classification\n}\n\nreturn {\n  json: {\n    ...requestData,\n    classification,\n    triaged_at: new Date().toISOString()\n  }\n};"
       },
-      "id": "0fa71929-3ae8-4212-8e70-bd994708c425",
-      "name": "Combine Classification",
+      "id": "parse-ai-response-001",
+      "name": "Parse AI Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -10416,
+        -10544,
         800
       ]
     },
@@ -104,7 +104,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Add case_id to the data\nconst requestData = $('Combine Classification').first().json;\nconst caseId = $input.item.json.case_id;\n\nreturn {\n  json: {\n    ...requestData,\n    case_id: caseId\n  }\n};"
+        "jsCode": "// Add case_id to the data\nconst requestData = $('Parse AI Response').first().json;\nconst caseId = $input.item.json.case_id;\n\nreturn {\n  json: {\n    ...requestData,\n    case_id: caseId\n  }\n};"
       },
       "id": "ffe38066-d7e8-4696-8c25-6a5cbf165188",
       "name": "Add Case ID",
@@ -320,7 +320,7 @@
           "mode": "list",
           "cachedResultName": "support-escalations"
         },
-        "text": "=:hand: *Human Review Required*\n\n*Case ID:* {{ $('Add Case ID').item.json.case_id }}\n*Customer:* {{ $('Add Case ID').item.json.customer_context.name }} ({{ $('Add Case ID').item.json.customer_context.account_tier }})\n*Priority:* {{ $('Add Case ID').item.json.classification.priority }}\n*Category:* {{ $('Add Case ID').item.json.classification.category }} / {{ $('Add Case ID').item.json.classification.subcategory }}\n*Complexity:* {{ $('Add Case ID').item.json.classification.estimated_complexity }}\n\n*Description:*\n{{ $('Add Case ID').item.json.description }}\n\n*AI Assessment:*\n{{ $('Add Case ID').item.json.classification.reasoning }}\n\n*Confidence:* {{ Math.round($('Add Case ID').item.json.classification.confidence * 100) }}%\n\n*Why Escalated:* Low confidence or complex issue requiring human expertise.\n\nPlease review and respond to the customer.\n",
+        "text": "=={{ $json.slack_message }}",
         "otherOptions": {}
       },
       "id": "567d4d05-b561-4a2b-8f61-707422c0966a",
@@ -511,7 +511,7 @@
     },
     {
       "parameters": {
-        "content": "## Workflow 1: Smart Support Intake & Triage\n\n**Purpose:** Receive support requests from all channels, normalize data, classify issues, and route to appropriate resolution path.\n\n### Flow:\n1. Webhook receives support request\n2. Extract and normalize request data\n3. Enrich with customer context from DB\n4. AI Agent classifies the issue\n5. Insert case record\n6. Route based on confidence/complexity:\n   - Critical → Immediate alert\n   - High confidence + Simple → Self-service\n   - Medium confidence + Enhancement → Jira Feature Request\n   - Medium confidence + Other → Collaborative\n   - Low confidence/Complex → Human escalation\n\n### Configuration Required:\n- Update PostgreSQL credentials\n- Update Slack credentials\n- Update Anthropic credentials\n- Update Jira credentials\n- Set N8N_WEBHOOK_BASE_URL environment variable\n- Set JIRA_DEV_PROJECT_ID environment variable",
+        "content": "## Workflow 1: Smart Support Intake & Triage\n\n**Purpose:** Receive support requests from all channels, normalize data, classify issues, and route to appropriate resolution path.\n\n### Flow:\n1. Webhook receives support request\n2. Extract and normalize request data\n3. Enrich with customer context from DB\n4. AI Agent classifies the issue\n5. Parse AI Response (Code node)\n6. Insert case record\n7. Route based on confidence/complexity:\n   - Critical → Immediate alert\n   - High confidence + Simple → Self-service\n   - Medium confidence + Enhancement → Jira Feature Request\n   - Medium confidence + Other → Collaborative (Confluence)\n   - Low confidence/Complex → Human escalation\n\n### Configuration Required:\n- Update PostgreSQL credentials\n- Update Slack credentials\n- Update Anthropic credentials\n- Update Jira credentials\n- Set N8N_WEBHOOK_BASE_URL environment variable\n- Set JIRA_DEV_PROJECT_ID environment variable\n\n### Updated 2026-01-30:\n- Removed Output Parser (was causing format errors)\n- Added Parse AI Response code node for robust JSON extraction",
         "height": 792,
         "width": 360
       },
@@ -655,10 +655,10 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Analyze this customer support request and classify it:\n\n**Customer:** {{ $json.customer_name }} ({{ $json.customer_email }})\n**Subject:** {{ $json.subject }}\n**Message:** {{ $json.message }}\n**Product:** {{ $json.product }} {{ $json.product_version }}\n**Channel:** {{ $json.channel }}\n\nClassify this request by:\n1. Category (billing, technical, account, general)\n2. Subcategory (more specific classification)\n3. Priority (low, medium, high, urgent)\n4. Sentiment (positive, neutral, frustrated, angry)\n5. Confidence score (0-1) for your classification\n6. Suggested routing (self_service, collaborative, escalation)\n\nReturn your analysis as structured JSON.\n",
-        "hasOutputParser": true,
+        "text": "={{ $json.triage_prompt }}",
+        "hasOutputParser": false,
         "options": {
-          "systemMessage": "You are a customer support triage specialist. Your role is to analyze support requests and classify them accurately.\n\nGiven a customer issue description and context, you must provide a JSON object with these exact fields:\n\n1. \"category\": Primary category - MUST be one of: \"configuration\", \"usage\", \"setup\", \"defect\", \"enhancement\", or \"other\"\n2. \"subcategory\": Specific subcategory within the main category\n3. \"priority\": MUST be one of: \"critical\", \"high\", \"medium\", or \"low\"\n4. \"confidence\": A number between 0 and 1 (e.g., 0.85)\n5. \"estimated_complexity\": MUST be one of: \"simple\", \"moderate\", or \"complex\"\n6. \"suggested_resolution_path\": MUST be one of: \"self-service\", \"collaborative\", or \"escalate\"\n7. \"reasoning\": Brief explanation of the classification\n\nPriority Guidelines:\n- critical: System down, data loss, security breach, multiple customers affected\n- high: Major functionality broken, VIP customer, revenue impact\n- medium: Workaround exists, single customer, no immediate business impact\n- low: Cosmetic issues, feature requests, questions\n\nComplexity Guidelines:\n- simple: Known issue, documented solution, <15 min resolution\n- moderate: Requires investigation, multiple steps, 15-60 min\n- complex: Requires engineering, code changes, >60 min\n\nResolution Path Guidelines:\n- self-service: High confidence (>0.85) + Simple complexity\n- collaborative: Medium confidence (0.60-0.85) or Moderate complexity\n- escalate: Low confidence (<0.60), Complex, or Critical priority\n\nConfidence Score Guidelines:\n- Only give >0.85 for crystal-clear, unambiguous issues\n- Give 0.60-0.85 for issues with some ambiguity\n- Give <0.60 for unclear or complex issues"
+          "systemMessage": "You are a customer support triage specialist. Analyze support requests and return ONLY valid JSON - no markdown, no explanations, just the JSON object."
         }
       },
       "id": "532c65ee-1b65-4d59-b2a6-03b777a6b698",
@@ -678,7 +678,7 @@
           "value": "claude-sonnet-4-5-20250929"
         },
         "options": {
-          "maxTokensToSample": 4096,
+          "maxTokensToSample": 1024,
           "temperature": 0.1
         }
       },
@@ -696,37 +696,9 @@
           "name": "Anthropic account"
         }
       }
-    },
-    {
-      "parameters": {
-        "schemaType": "manual",
-        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"category\": {\n      \"type\": \"string\",\n      \"description\": \"Primary issue category: configuration, usage, setup, defect, enhancement, or other\"\n    },\n    \"subcategory\": {\n      \"type\": \"string\",\n      \"description\": \"Specific subcategory within the main category\"\n    },\n    \"priority\": {\n      \"type\": \"string\",\n      \"description\": \"Priority level: critical, high, medium, or low\"\n    },\n    \"confidence\": {\n      \"type\": \"number\",\n      \"description\": \"Confidence score for the classification (0-1)\"\n    },\n    \"estimated_complexity\": {\n      \"type\": \"string\",\n      \"description\": \"Estimated complexity: simple, moderate, or complex\"\n    },\n    \"suggested_resolution_path\": {\n      \"type\": \"string\",\n      \"description\": \"Recommended resolution path: self-service, collaborative, or escalate\"\n    },\n    \"reasoning\": {\n      \"type\": \"string\",\n      \"description\": \"Brief explanation of the classification\"\n    }\n  },\n  \"required\": [\"category\", \"subcategory\", \"priority\", \"confidence\", \"estimated_complexity\", \"suggested_resolution_path\", \"reasoning\"]\n}"
-      },
-      "id": "a130d01d-b6c9-49d7-ab38-55ea1003bcd5",
-      "name": "Triage Output Parser",
-      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
-      "typeVersion": 1.3,
-      "position": [
-        -10640,
-        1024
-      ]
     }
   ],
-  "pinData": {
-    "Webhook - Support Intake": [
-      {
-        "json": {
-          "customer_email": "shawnbrianray@gmail.com",
-          "customer_name": "Test User",
-          "subject": "Dashboard export to PDF not working",
-          "message": "Hi, I'm trying to export my analytics dashboard to PDF but when I click the Export button, nothing happens. I've tried refreshing the page and using different browsers (Chrome and Safari) but the issue persists. This is urgent as I need to share these reports with my team by end of day. Can you please help?",
-          "channel": "email",
-          "product": "Analytics Platform",
-          "product_version": "2.5.0"
-        }
-      }
-    ]
-  },
+  "pinData": {},
   "connections": {
     "Webhook - Support Intake": {
       "main": [
@@ -776,25 +748,14 @@
       "main": [
         [
           {
-            "node": "Combine Classification",
+            "node": "Parse AI Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Triage Output Parser": {
-      "ai_outputParser": [
-        [
-          {
-            "node": "AI Triage Agent",
-            "type": "ai_outputParser",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Combine Classification": {
+    "Parse AI Response": {
       "main": [
         [
           {

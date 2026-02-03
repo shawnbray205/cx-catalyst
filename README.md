@@ -10,7 +10,8 @@ This system uses AI to automatically classify, route, and resolve customer suppo
 
 - **Smart Intake & Triage** - Automatically classifies and prioritizes incoming support requests
 - **Self-Service Resolution** - AI-generated solutions for common issues with 85%+ accuracy
-- **Confluence Knowledge Base Integration** - Seamless access to wiki pages, documentation, and institutional knowledge
+- **100+ KB Articles** - Comprehensive Confluence knowledge base covering Enterprise, SMB, and Small Business tiers
+- **Semantic Search** - Vector-powered KB retrieval using OpenAI embeddings and pgvector
 - **Proactive Detection** - Monitors systems and prevents issues before customers report them
 - **Human-in-Loop** - Expert review for complex cases with AI assistance
 - **Continuous Learning** - Daily analysis improves accuracy and identifies patterns
@@ -117,7 +118,19 @@ See the [Workflows README](n8n-workflows/README.md) for detailed workflow docume
 │   ├── QUICK-START.md                # 30-minute setup guide
 │   ├── USER-GUIDE.md                 # Support team user guide
 │   ├── ADMIN-GUIDE.md                # System administration guide
-│   └── API-REFERENCE.md              # API documentation
+│   ├── API-REFERENCE.md              # API & webhook documentation
+│   ├── BEST-PRACTICES.md            # KB, workflow, and security optimization
+│   ├── ERROR-REFERENCE.md           # Error codes and troubleshooting
+│   ├── RELEASE-NOTES.md             # Version history and changelog
+│   ├── CONFLUENCE-INTEGRATION.md    # Confluence KB setup and maintenance
+│   ├── CONFLUENCE-WORKFLOW-DIAGRAM.md # Visual workflow reference
+│   ├── JIRA-INTEGRATION.md          # Jira project and escalation setup
+│   ├── EMAIL-INTEGRATION.md         # Gmail/email channel setup
+│   ├── SLACK-CONFIGURATION.md       # Slack bot setup guide
+│   ├── SUPABASE-CLOUD-SETUP.md      # Cloud database configuration
+│   ├── AI-PROMPTS-REFERENCE.md      # AI prompt configurations
+│   ├── WORKFLOW-TESTING-NOTES.md    # Testing procedures
+│   └── WORKFLOW-5-ENHANCEMENTS.md   # WF5 enhancement notes
 ├── n8n-workflows/                     # n8n workflow files
 │   ├── README.md                     # Workflow documentation
 │   ├── workflow-1-smart-intake-triage.json
@@ -266,12 +279,27 @@ Workflow 5 automatically maintains Confluence:
 
 ## Documentation
 
+### Getting Started
 - **[Quick Start Guide](docs/QUICK-START.md)** - Get running in 30 minutes
-- **[Confluence Integration Guide](docs/CONFLUENCE-INTEGRATION.md)** - Complete KB setup and maintenance ⭐
+- **[User Guide](docs/USER-GUIDE.md)** - For support staff, team leads, and customers
+- **[Admin Guide](docs/ADMIN-GUIDE.md)** - System configuration, installation, and maintenance
+
+### API & Webhooks
+- **[API Reference](docs/API-REFERENCE.md)** - Webhook endpoints and outgoing webhooks
+- **[Error Reference](docs/ERROR-REFERENCE.md)** - Error codes, diagnostics, and troubleshooting
+
+### Integration Guides
+- **[Confluence Integration](docs/CONFLUENCE-INTEGRATION.md)** - KB setup, indexing, and maintenance
+- **[Slack Configuration](docs/SLACK-CONFIGURATION.md)** - Slack bot and channel setup
+- **[Jira Integration](docs/JIRA-INTEGRATION.md)** - Bug tracking and escalation setup
+- **[Email Integration](docs/EMAIL-INTEGRATION.md)** - Gmail/email channel configuration
+- **[Supabase Cloud Setup](docs/SUPABASE-CLOUD-SETUP.md)** - Database and vector store configuration
+
+### Best Practices & Reference
+- **[Best Practices](docs/BEST-PRACTICES.md)** - KB optimization, workflow tuning, security hardening
+- **[AI Prompts Reference](docs/AI-PROMPTS-REFERENCE.md)** - AI agent prompt configurations
 - **[Confluence Workflow Diagrams](docs/CONFLUENCE-WORKFLOW-DIAGRAM.md)** - Visual reference for KB integration
-- **[User Guide](docs/USER-GUIDE.md)** - For support team members
-- **[Admin Guide](docs/ADMIN-GUIDE.md)** - System administration
-- **[API Reference](docs/API-REFERENCE.md)** - Webhook API documentation
+- **[Release Notes](docs/RELEASE-NOTES.md)** - Version history and changelog
 
 ## Dashboard & Monitoring
 
@@ -528,6 +556,6 @@ For issues with this system:
 
 ---
 
-**Version**: 1.0
+**Version**: 2.0
 **Last Updated**: January 2026
 **Maintained By**: Operations Team

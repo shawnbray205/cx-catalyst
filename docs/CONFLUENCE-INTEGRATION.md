@@ -1048,6 +1048,22 @@ Monitor these in your dashboard:
 
 ---
 
+## KB Coverage by Customer Tier
+
+The knowledge base currently contains **100+ articles** organized by customer tier:
+
+| Customer Tier | Article Count | Key Categories |
+|---------------|--------------|----------------|
+| Enterprise | 50 | API & Integration (15), Security & Compliance (10), SSO/Auth (8), Performance & Scaling (7), Admin & Config (10) |
+| SMB | 30 | Account Management (8), Billing & Subscriptions (6), Integrations (8), Product Features (8) |
+| Small Business | 20 | Order Management (5), Shipping & Returns (4), Account Help (3), Product FAQs (3), Getting Started (5) |
+
+Articles are stored in the Confluence `PKB` space and indexed into the `confluence_kb` Supabase table with vector embeddings for semantic search.
+
+To expand coverage, see the [Best Practices Guide](BEST-PRACTICES.md#knowledge-base-optimization) for article structure, tagging, and content freshness guidelines.
+
+---
+
 ## Next Steps
 
 1. **Complete Initial Setup** (Today)
@@ -1056,7 +1072,7 @@ Monitor these in your dashboard:
    - [ ] Configure Supabase
 
 2. **Populate Knowledge Base** (Week 1)
-   - [ ] Create 20-50 core articles
+   - [ ] Create 50-100 core articles across customer tiers (see KB Coverage below)
    - [ ] Apply templates and labels
    - [ ] Review and edit for consistency
 
@@ -1090,4 +1106,4 @@ Monitor these in your dashboard:
 
 ---
 
-*Confluence Integration Guide v1.0 - January 2026*
+*Confluence Integration Guide v2.0 - January 2026*

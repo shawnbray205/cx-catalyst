@@ -1,0 +1,408 @@
+{
+  "name": "Support - Batch Job Poller",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "a1b00001-0001-4000-8000-000000000001",
+      "name": "Schedule - Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1800, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM batch_jobs WHERE status IN ('submitted', 'in_progress') ORDER BY submitted_at ASC;",
+        "options": {}
+      },
+      "id": "a1b00001-0002-4000-8000-000000000002",
+      "name": "Fetch Pending Batches",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-1560, 400],
+      "credentials": {
+        "postgres": {
+          "id": "akAuGKYi4ALrVnlP",
+          "name": "cx-catalyst"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": { "reset": false }
+      },
+      "id": "a1b00001-0004-4000-8000-000000000004",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-1320, 400]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{ $json.provider }}", "rightValue": "openai", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true, "outputKey": "OpenAI"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{ $json.provider }}", "rightValue": "anthropic", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true, "outputKey": "Anthropic"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "a1b00001-0005-4000-8000-000000000005",
+      "name": "Route by Provider",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [-1040, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.openai.com/v1/batches/\" + $json.batch_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "a1b00001-0006-4000-8000-000000000006",
+      "name": "Poll OpenAI Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-760, 280],
+      "credentials": { "openAiApi": { "id": "x6T6BlWTbq0xsdSm", "name": "OpenAi account" } },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.anthropic.com/v1/messages/batches/\" + $json.batch_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "anthropic-beta", "value": "message-batches-2024-09-24" }
+          ]
+        },
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "a1b00001-0007-4000-8000-000000000007",
+      "name": "Poll Anthropic Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-760, 520],
+      "credentials": { "httpHeaderAuth": { "id": "b05207", "name": "Anthropic API - Header Auth" } },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge poll response with original batch job data\n// The HTTP Request node replaces $json with the API response,\n// so we need to reconstruct the batch job context.\nconst pollResponse = $input.item.json;\n\n// Get the original batch job data from the Loop Over Items node\nconst batchJob = $('Loop Over Items').first().json;\n\nlet isComplete = false;\nlet hasFailed = false;\nlet resultsRef = null;\n\nif (batchJob.provider === 'openai') {\n  isComplete = pollResponse.status === 'completed';\n  hasFailed = pollResponse.status === 'failed' || pollResponse.status === 'expired' || pollResponse.status === 'cancelled';\n  resultsRef = pollResponse.output_file_id || null;\n} else {\n  isComplete = pollResponse.processing_status === 'ended';\n  hasFailed = pollResponse.processing_status === 'ended' && (pollResponse.request_counts?.succeeded || 0) === 0;\n  resultsRef = pollResponse.results_url || null;\n}\n\nreturn {\n  json: {\n    ...batchJob,\n    poll_status: pollResponse.status || pollResponse.processing_status,\n    is_complete: isComplete,\n    has_failed: hasFailed,\n    results_ref: resultsRef\n  }\n};\n"
+      },
+      "id": "a1b00001-0020-4000-8000-000000000020",
+      "name": "Check OpenAI Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge poll response with original batch job data\nconst pollResponse = $input.item.json;\nconst batchJob = $('Loop Over Items').first().json;\n\nlet isComplete = false;\nlet hasFailed = false;\nlet resultsRef = null;\n\nisComplete = pollResponse.processing_status === 'ended';\nhasFailed = pollResponse.processing_status === 'ended' && (pollResponse.request_counts?.succeeded || 0) === 0;\nresultsRef = pollResponse.results_url || null;\n\nreturn {\n  json: {\n    ...batchJob,\n    poll_status: pollResponse.processing_status,\n    is_complete: isComplete,\n    has_failed: hasFailed,\n    results_ref: resultsRef\n  }\n};\n"
+      },
+      "id": "a1b00001-0021-4000-8000-000000000021",
+      "name": "Check Anthropic Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 520]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "is-complete", "leftValue": "={{ $json.is_complete }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b00001-000a-4000-8000-00000000000a",
+      "name": "Is Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-200, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "is-failed", "leftValue": "={{ $json.has_failed }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b00001-000b-4000-8000-00000000000b",
+      "name": "Check Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [40, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE batch_jobs SET status = 'in_progress' WHERE batch_job_id = '{{ $json.batch_job_id }}' AND status = 'submitted';",
+        "options": {}
+      },
+      "id": "a1b00001-000c-4000-8000-00000000000c",
+      "name": "Update In Progress",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [280, 720],
+      "credentials": { "postgres": { "id": "akAuGKYi4ALrVnlP", "name": "cx-catalyst" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE batch_jobs SET status = 'failed', completed_at = NOW(), error_message = '{{ $json.poll_status }}' WHERE batch_job_id = '{{ $json.batch_job_id }}';",
+        "options": {}
+      },
+      "id": "a1b00001-000d-4000-8000-00000000000d",
+      "name": "Update Failed Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [280, 520],
+      "credentials": { "postgres": { "id": "akAuGKYi4ALrVnlP", "name": "cx-catalyst" } }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{ $json.provider }}", "rightValue": "openai", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true, "outputKey": "OpenAI"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [{ "leftValue": "={{ $json.provider }}", "rightValue": "anthropic", "operator": { "type": "string", "operation": "equals" } }],
+                "combinator": "and"
+              },
+              "renameOutput": true, "outputKey": "Anthropic"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "a1b00001-000e-4000-8000-00000000000e",
+      "name": "Route Download by Provider",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [40, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.openai.com/v1/files/\" + $json.results_ref + \"/content\" }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "id": "a1b00001-000f-4000-8000-00000000000f",
+      "name": "Download OpenAI Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 80],
+      "credentials": { "openAiApi": { "id": "x6T6BlWTbq0xsdSm", "name": "OpenAi account" } },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.results_ref }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "anthropic-beta", "value": "message-batches-2024-09-24" }
+          ]
+        },
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "id": "a1b00001-0010-4000-8000-000000000010",
+      "name": "Download Anthropic Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 280],
+      "credentials": { "httpHeaderAuth": { "id": "b05207", "name": "Anthropic API - Header Auth" } },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawData = $input.item.json;\n// Retrieve batch job context from the Is Complete? node (which got it from Check *  Completion)\nconst batchJob = $('Is Complete?').first().json;\n\nlet rawText = '';\nif (typeof rawData === 'string') {\n  rawText = rawData;\n} else if (rawData.data) {\n  rawText = rawData.data;\n} else if (rawData.body) {\n  rawText = typeof rawData.body === 'string' ? rawData.body : JSON.stringify(rawData.body);\n} else {\n  rawText = JSON.stringify(rawData);\n}\n\nconst lines = rawText.trim().split('\\n').filter(l => l.trim());\nconst results = lines.map(line => {\n  try { return JSON.parse(line); } catch(e) { return null; }\n}).filter(r => r !== null);\n\nlet parsedResults = [];\nif (batchJob.provider === 'openai') {\n  parsedResults = results.map(r => ({\n    custom_id: r.custom_id,\n    content: r.response?.body?.choices?.[0]?.message?.content || '',\n    usage: r.response?.body?.usage || {}\n  }));\n} else {\n  parsedResults = results.map(r => ({\n    custom_id: r.custom_id,\n    content: r.result?.message?.content?.[0]?.text || '',\n    usage: r.result?.usage || {}\n  }));\n}\n\nreturn {\n  json: {\n    batch_job_id: batchJob.batch_job_id,\n    batch_id: batchJob.batch_id,\n    provider: batchJob.provider,\n    workflow_name: batchJob.workflow_name,\n    workflow_stage: batchJob.workflow_stage,\n    parent_run_id: batchJob.parent_run_id,\n    context_data: batchJob.context_data,\n    resume_url: batchJob.resume_url,\n    results: parsedResults,\n    result_count: parsedResults.length\n  }\n};\n"
+      },
+      "id": "a1b00001-0012-4000-8000-000000000012",
+      "name": "Parse OpenAI Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawData = $input.item.json;\nconst batchJob = $('Is Complete?').first().json;\n\nlet rawText = '';\nif (typeof rawData === 'string') {\n  rawText = rawData;\n} else if (rawData.data) {\n  rawText = rawData.data;\n} else if (rawData.body) {\n  rawText = typeof rawData.body === 'string' ? rawData.body : JSON.stringify(rawData.body);\n} else {\n  rawText = JSON.stringify(rawData);\n}\n\nconst lines = rawText.trim().split('\\n').filter(l => l.trim());\nconst results = lines.map(line => {\n  try { return JSON.parse(line); } catch(e) { return null; }\n}).filter(r => r !== null);\n\nconst parsedResults = results.map(r => ({\n  custom_id: r.custom_id,\n  content: r.result?.message?.content?.[0]?.text || '',\n  usage: r.result?.usage || {}\n}));\n\nreturn {\n  json: {\n    batch_job_id: batchJob.batch_job_id,\n    batch_id: batchJob.batch_id,\n    provider: batchJob.provider,\n    workflow_name: batchJob.workflow_name,\n    workflow_stage: batchJob.workflow_stage,\n    parent_run_id: batchJob.parent_run_id,\n    context_data: batchJob.context_data,\n    resume_url: batchJob.resume_url,\n    results: parsedResults,\n    result_count: parsedResults.length\n  }\n};\n"
+      },
+      "id": "a1b00001-0022-4000-8000-000000000022",
+      "name": "Parse Anthropic Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 280]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE batch_jobs SET status = 'completed', completed_at = NOW() WHERE batch_job_id = '{{ $json.batch_job_id }}';",
+        "options": {}
+      },
+      "id": "a1b00001-0013-4000-8000-000000000013",
+      "name": "Update Completed Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [820, 180],
+      "credentials": { "postgres": { "id": "akAuGKYi4ALrVnlP", "name": "cx-catalyst" } }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.resume_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ batch_job_id: $json.batch_job_id, results: $json.results, context_data: $json.context_data, parent_run_id: $json.parent_run_id, result_count: $json.result_count }) }}",
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      },
+      "id": "a1b00001-0014-4000-8000-000000000014",
+      "name": "Resume Parent Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1060, 180],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Support - Batch Job Poller\n\n**Purpose:** Shared sub-workflow that polls OpenAI and Anthropic batch API endpoints for completion, then resumes the parent workflow via its $execution.resumeUrl.\n\n### Architecture:\n- Uses Loop Over Items to iterate batch jobs one at a time\n- Separate provider paths avoid Merge node issues\n- Each path has its own Check Completion + Parse Results\n- No feedback loops — Loop Over Items handles iteration\n\n### Flow:\n1. Schedule trigger every 5 minutes\n2. Fetch pending batch jobs from PostgreSQL\n3. Loop Over Items (1 at a time):\n   a. Route by provider (OpenAI / Anthropic)\n   b. Poll the batch API status endpoint\n   c. Check completion status\n4. On completion:\n   a. Route download by provider\n   b. Download + parse results\n   c. Update DB status to completed\n   d. PUT to resume_url to wake up parent workflow\n5. On failure: Update DB status to failed\n6. Still in progress: Update status, continue loop\n\n### Credentials Required:\n- PostgreSQL (cx-catalyst)\n- OpenAI API - Header Auth\n- Anthropic API - Header Auth",
+        "height": 700,
+        "width": 380
+      },
+      "id": "a1b00001-0015-4000-8000-000000000015",
+      "name": "Workflow Info",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-2240, 120]
+    }
+  ],
+  "connections": {
+    "Schedule - Every 5 min": {
+      "main": [[{ "node": "Fetch Pending Batches", "type": "main", "index": 0 }]]
+    },
+    "Fetch Pending Batches": {
+      "main": [[{ "node": "Loop Over Items", "type": "main", "index": 0 }]]
+    },
+    "Loop Over Items": {
+      "main": [[], [{ "node": "Route by Provider", "type": "main", "index": 0 }]]
+    },
+    "Route by Provider": {
+      "main": [
+        [{ "node": "Poll OpenAI Batch", "type": "main", "index": 0 }],
+        [{ "node": "Poll Anthropic Batch", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Poll OpenAI Batch": {
+      "main": [[{ "node": "Check OpenAI Completion", "type": "main", "index": 0 }]]
+    },
+    "Poll Anthropic Batch": {
+      "main": [[{ "node": "Check Anthropic Completion", "type": "main", "index": 0 }]]
+    },
+    "Check OpenAI Completion": {
+      "main": [[{ "node": "Is Complete?", "type": "main", "index": 0 }]]
+    },
+    "Check Anthropic Completion": {
+      "main": [[{ "node": "Is Complete?", "type": "main", "index": 0 }]]
+    },
+    "Is Complete?": {
+      "main": [
+        [{ "node": "Route Download by Provider", "type": "main", "index": 0 }],
+        [{ "node": "Check Failed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Failed": {
+      "main": [
+        [{ "node": "Update Failed Status", "type": "main", "index": 0 }],
+        [{ "node": "Update In Progress", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update In Progress": {
+      "main": [[{ "node": "Loop Over Items", "type": "main", "index": 0 }]]
+    },
+    "Update Failed Status": {
+      "main": [[{ "node": "Loop Over Items", "type": "main", "index": 0 }]]
+    },
+    "Route Download by Provider": {
+      "main": [
+        [{ "node": "Download OpenAI Results", "type": "main", "index": 0 }],
+        [{ "node": "Download Anthropic Results", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Download OpenAI Results": {
+      "main": [[{ "node": "Parse OpenAI Results", "type": "main", "index": 0 }]]
+    },
+    "Download Anthropic Results": {
+      "main": [[{ "node": "Parse Anthropic Results", "type": "main", "index": 0 }]]
+    },
+    "Parse OpenAI Results": {
+      "main": [[{ "node": "Update Completed Status", "type": "main", "index": 0 }]]
+    },
+    "Parse Anthropic Results": {
+      "main": [[{ "node": "Update Completed Status", "type": "main", "index": 0 }]]
+    },
+    "Update Completed Status": {
+      "main": [[{ "node": "Resume Parent Workflow", "type": "main", "index": 0 }]]
+    },
+    "Resume Parent Workflow": {
+      "main": [[{ "node": "Loop Over Items", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b01e799c8597a418342586f9fe42b57cf7798483b7d7540aea0ab43464ea70a2"
+  },
+  "tags": [
+    { "name": "support" },
+    { "name": "batch" },
+    { "name": "polling" }
+  ]
+}
