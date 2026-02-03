@@ -641,7 +641,7 @@ Category: {{ $json.category }}
 Number of cases: {{ $json.issue_count }}
 
 Sample issues:
-{{ $json.sample_issues.map(i => `- ${i.description}\n  Solution: ${i.solution}`).join('\n') }}
+{{ $json.sample_issues.map(i => '- ' ~ i.description ~ '\n  Solution: ' ~ i.solution).join('\n') }}
 
 Create a KB article using this template:
 
