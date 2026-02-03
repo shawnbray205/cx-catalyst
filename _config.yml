@@ -1,0 +1,30 @@
+# Jekyll configuration for GitHub Pages
+# Disable Liquid processing for documentation files containing code examples
+
+# Set defaults for specific paths
+defaults:
+  # Disable Liquid for n8n workflow documentation
+  - scope:
+      path: "n8n-workflows"
+      type: "pages"
+    values:
+      render_with_liquid: false
+  # Disable Liquid for docs folder
+  - scope:
+      path: "docs"
+      type: "pages"
+    values:
+      render_with_liquid: false
+
+# Exclude directories that shouldn't be processed
+exclude:
+  - node_modules
+  - vendor
+  - .git
+  - .github
+
+# Use kramdown for markdown processing
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
